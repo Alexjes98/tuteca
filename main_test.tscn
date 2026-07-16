@@ -1,0 +1,132 @@
+[gd_scene format=3 uid="uid://ddnvcfccasiaw"]
+
+[ext_resource type="ArrayMesh" uid="uid://dtua72kru8el5" path="res://assets/3D/tuteca.obj" id="1_54b8x"]
+[ext_resource type="Script" path="res://main_test.gd" id="2_script"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_34120"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ce0kv"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_rywbs"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_34120"]
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_floor"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall"]
+size = Vector3(1, 1, 1)
+
+[node name="Node3D" type="Node3D"]
+script = ExtResource("2_script")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.25881907, -0.2984875, 0.9186501, 0, 0.95105654, 0.30901703, -0.9659258, -0.0799795, 0.24615158, 2.3922, 1.7594593, 6.247422)
+
+[node name="Map" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Map"]
+transform = Transform3D(8.81, 0, 0, 0, 8.81, 0, 0, 0, 8.81, -0.030049324, 0.012003899, 0.0066108704)
+material_override = SubResource("StandardMaterial3D_34120")
+material_overlay = SubResource("StandardMaterial3D_ce0kv")
+mesh = SubResource("PlaneMesh_rywbs")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/StaticBody3D"]
+shape = SubResource("WorldBoundaryShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Map/MeshInstance3D"]
+transform = Transform3D(0.049999997, 0, 0, 0, 0.23, 0, 0, 0, 1.9499999, -0.95123065, 0.049696926, 0)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D/StaticBody3D"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="Map/MeshInstance3D"]
+transform = Transform3D(-4.240005e-09, 0, 1.969, 0, 0.178, 0, -0.097, 0, -8.606772e-08, 0.044579398, 0.06267167, -0.9426297)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D3"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D3/StaticBody3D"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D4" type="MeshInstance3D" parent="Map/MeshInstance3D"]
+transform = Transform3D(-4.240005e-09, 0, 1.999, 0, 0.178, 0, -0.097, 0, -8.7379064e-08, 0.010268992, 0.06267167, 1.0037131)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D4"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D4/StaticBody3D"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="Map/MeshInstance3D"]
+transform = Transform3D(0.069, 0, 0, 0, 0.202, 0, 0, 0, 1.9279997, 0.99373204, 0.049419988, 0.05747722)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D2"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D2/StaticBody3D"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.83876866, 0.29304576, -0.45890224, 0.06215347, 0.8888361, 0.45399052, 0.54092884, 0.35227066, -0.7637417, 0, 2.8911173, 0)
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="."]
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="LobbyUI" type="Control" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="CanvasLayer/LobbyUI"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = -100.0
+offset_right = 140.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/LobbyUI/PanelContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "TUTECA MULTIPLAYER"
+horizontal_alignment = 1
+
+[node name="Separator" type="HSeparator" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="IPInput" type="LineEdit" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "IP Address"
+text = "127.0.0.1"
+alignment = 1
+
+[node name="HostButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Host"
+
+[node name="JoinButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Join"
+
+[connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/HostButton" to="." method="_on_host_pressed"]
+[connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/JoinButton" to="." method="_on_join_pressed"]

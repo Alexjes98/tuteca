@@ -1,0 +1,21 @@
+[gd_scene format=3 uid="uid://cplayrtscn001"]
+
+[ext_resource type="ArrayMesh" uid="uid://dtua72kru8el5" path="res://assets/3D/tuteca.obj" id="1_tuteca"]
+[ext_resource type="Script" path="res://player.gd" id="2_script"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+
+[node name="CharacterBody3D" type="CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.87753415, 5.7945185)
+script = ExtResource("2_script")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.9659258, -0.21949099, 0.1371532, 0, 0.52991927, 0.8480481, -0.25881904, -0.8191515, 0.5118627, 0, 0, 0)
+mesh = ExtResource("1_tuteca")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -0.0383878, -0.9992629, 0, 0.9992629, -0.0383878, 0, -0.35655773, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
