@@ -1,6 +1,5 @@
 [gd_scene format=3 uid="uid://ddnvcfccasiaw"]
 
-[ext_resource type="PackedScene" uid="uid://b3asiofci4fb7" path="res://assets/3D/Cat.glb" id="2_mijvv"]
 [ext_resource type="Script" uid="uid://cp41xxxu2lcs4" path="res://main_test.gd" id="2_script"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_34120"]
@@ -122,6 +121,23 @@ horizontal_alignment = 1
 [node name="Separator" type="HSeparator" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=1922298419]
 layout_mode = 2
 
+[node name="CharacterLabel" type="Label" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=1555974432]
+layout_mode = 2
+text = "Choose your character:"
+horizontal_alignment = 1
+
+[node name="CharacterRow" type="HBoxContainer" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=259242125]
+layout_mode = 2
+alignment = 1
+
+[node name="GekkoButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/CharacterRow" unique_id=1920516154]
+layout_mode = 2
+text = "🦎 Gekko"
+
+[node name="CatButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/CharacterRow" unique_id=650829227]
+layout_mode = 2
+text = "🐱 Cat"
+
 [node name="IPInput" type="LineEdit" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=649601895]
 layout_mode = 2
 text = "127.0.0.1"
@@ -135,11 +151,6 @@ text = "Host"
 [node name="JoinButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=2004493389]
 layout_mode = 2
 text = "Join"
-
-[node name="GATO" type="Node3D" parent="." unique_id=1648990452]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.07526493, 1.5786421, 6.095034)
-
-[node name="Cat" parent="GATO" unique_id=2028925573 instance=ExtResource("2_mijvv")]
 
 [connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/HostButton" to="." method="_on_host_pressed"]
 [connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/JoinButton" to="." method="_on_join_pressed"]
