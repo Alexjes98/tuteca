@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://cplayrtscn001"]
 
 [ext_resource type="PackedScene" uid="uid://cfrgg8kaub5v1" path="res://assets/3D/tuteca.glb" id="1_tuteca"]
-[ext_resource type="Script" path="res://player.gd" id="2_script"]
+[ext_resource type="Script" uid="uid://dr86hc6t7o4ea" path="res://scripts/player.gd" id="2_script"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
 
