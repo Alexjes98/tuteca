@@ -33,8 +33,9 @@ func _process_special(delta: float) -> void:
 # ─────────────────────────────────────────────────────────────────────────────
 ## Pounce: burst forward in the direction the cat is facing.
 func _do_pounce() -> void:
-	# -Z is the forward axis in Godot's default basis
-	var forward := -transform.basis.z.normalized()
+	# The body never rotates (free-look camera), so "facing" lives on the
+	# visual model — pounce toward the model's -Z.
+	var forward := -_model_root.transform.basis.z.normalized()
 	velocity += forward * POUNCE_FORCE
 	velocity.y = POUNCE_UP_KICK
 	_pounce_timer = POUNCE_COOLDOWN

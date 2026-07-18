@@ -61,10 +61,9 @@ func _process_climbing() -> void:
 	if Input.is_action_pressed("move_back"):    vertical = -1.0
 
 	# move_left / move_right → strafe laterally along the wall surface.
-	# Use the player body's own world-space right (basis.x) so A/D stay
-	# perspective-correct regardless of which direction the player faces.
-	var raw_right  := transform.basis.x
-	var wall_right := (raw_right - raw_right.dot(_wall_normal) * _wall_normal).normalized()
+	# Tangent of the wall itself (UP × normal): horizontal, hugs the wall
+	# plane, and works no matter where the body or camera are pointing.
+	var wall_right := Vector3.UP.cross(_wall_normal).normalized()
 	var lateral: float = 0.0
 	if Input.is_action_pressed("move_left"):  lateral = -1.0
 	if Input.is_action_pressed("move_right"): lateral =  1.0
