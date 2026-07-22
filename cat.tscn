@@ -1,30 +1,30 @@
-[gd_scene format=3 uid="uid://catscn_tuteca1"]
+[gd_scene format=3 uid="uid://511bvcxm8scs"]
 
 [ext_resource type="PackedScene" uid="uid://b3asiofci4fb7" path="res://assets/3D/Cat.glb" id="1_cat"]
-[ext_resource type="Script" path="res://scripts/cat.gd" id="2_script"]
+[ext_resource type="Script" uid="uid://b1yr6v5djuxv6" path="res://scripts/cat.gd" id="2_script"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_cat"]
 radius = 0.22
 height = 0.57
 
-[node name="CharacterBody3D" type="CharacterBody3D"]
+[node name="CharacterBody3D" type="CharacterBody3D" unique_id=1013536610]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.32, 5.7945185)
 script = ExtResource("2_script")
 
-[node name="ModelRoot" type="Node3D" parent="."]
+[node name="ModelRoot" type="Node3D" parent="." unique_id=1671448006]
 transform = Transform3D(18, 0, 0, 0, 18, 0, 0, 0, 18, 0, -0.285, 0)
 
-[node name="Cat" parent="ModelRoot" instance=ExtResource("1_cat")]
-transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+[node name="Cat" parent="ModelRoot" unique_id=753610611 instance=ExtResource("1_cat")]
+transform = Transform3D(-1.8, 0, 2.7179243e-07, 0, 1.8, 0, -2.7179243e-07, 0, -1.8, 0, 0, 0)
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=370219562]
 shape = SubResource("CapsuleShape3D_cat")
 
-[node name="CameraPivot" type="Node3D" parent="."]
+[node name="CameraPivot" type="Node3D" parent="." unique_id=570845749]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
 
-[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot" unique_id=1182178323]
 spring_length = 1.9
 margin = 0.1
 
-[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D" unique_id=1324427307]
