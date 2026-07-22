@@ -5,3 +5,4 @@ DO NOT DELETE THE FIXES IN THE LIST, CROSS OUT THE FIXES IN THE LIST WHEN FIXED.
     - Cat is too slow
     - Tuteca needs traction reduction on wall climbing
     - Tuteca can't climb horizontal surfaces
+    - Cat can't walk over bed low side

@@ -5,7 +5,7 @@
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_cat"]
 radius = 0.22
-height = 0.57
+height = 1.0862695
 
 [node name="CharacterBody3D" type="CharacterBody3D" unique_id=1013536610]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.32, 5.7945185)
@@ -15,13 +15,14 @@ script = ExtResource("2_script")
 transform = Transform3D(18, 0, 0, 0, 18, 0, 0, 0, 18, 0, -0.285, 0)
 
 [node name="Cat" parent="ModelRoot" unique_id=753610611 instance=ExtResource("1_cat")]
-transform = Transform3D(-1.8, 0, 2.7179243e-07, 0, 1.8, 0, -2.7179243e-07, 0, -1.8, 0, 0, 0)
+transform = Transform3D(-3.42, 0, 5.1640563e-07, 0, 3.42, 0, -5.1640563e-07, 0, -3.42, 0, 0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=370219562]
+transform = Transform3D(1, 0, 0, 0, 0.394139, 0.9190508, 0, -0.9190508, 0.394139, 0, 0.35680592, -0.25722456)
 shape = SubResource("CapsuleShape3D_cat")
 
 [node name="CameraPivot" type="Node3D" parent="." unique_id=570845749]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1540926, -0.440053)
 
 [node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot" unique_id=1182178323]
 spring_length = 1.9
