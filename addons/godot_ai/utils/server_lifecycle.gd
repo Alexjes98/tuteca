@@ -59,6 +59,13 @@ var _connection_blocked: bool = false
 ## refresh budget.
 var _refresh_retried: bool = false
 
+## One-shot guard for the spawn-lost-port-race re-adoption (see
+## `_diagnose_spawn_fast_exit`). Reset at the top of `start_server` like
+## `_refresh_retried`, so each walk gets one re-adopt budget; a second
+## fast exit in the same walk falls through to the legacy CRASHED
+## diagnosis instead of re-walking forever.
+var _readopt_after_spawn_exit_retried: bool = false
+
 ## Bounded deadline for the foreign-port adoption-confirmation watcher.
 ## Zero when disarmed.
 var _adoption_watch_deadline_ms: int = 0
@@ -621,6 +628,7 @@ func _start_server_impl(async_gen: int) -> void:
 		return
 
 	_refresh_retried = false
+	_readopt_after_spawn_exit_retried = false
 	_conflict_port = 0
 
 	var port := ClientConfigurator.http_port()
@@ -637,20 +645,21 @@ func _start_server_impl(async_gen: int) -> void:
 	if _async_stale(async_gen):
 		return
 	if not port_in_use:
-		## #745: after an editor crash the managed server keeps running, yet
-		## the bind probe can still say "free" (Windows lets a SO_REUSEADDR
-		## bind succeed over a live listener; the scrape fallback can fail
-		## transiently). The surviving pid-file is the tie-breaker: when it
-		## names a live, godot-ai-branded process AND the HTTP status probe
-		## on our port answers as a godot-ai server, treat the port as
-		## occupied so the adopt/recover branch below runs instead of
-		## blind-spawning a duplicate server. A dead/stale/foreign pid or an
-		## unresponsive port falls through to the normal spawn path
-		## unchanged.
+		## #745: after an editor crash (or under multi-editor churn) the
+		## managed server keeps running, yet the bind probe can still say
+		## "free" (Windows lets a SO_REUSEADDR bind succeed over a live
+		## listener; the scrape fallback can fail transiently). The HTTP
+		## status probe is the authoritative tie-breaker and runs
+		## UNCONDITIONALLY: the pid-file evidence gate that used to guard it
+		## goes stale exactly when it's needed most — same-named test
+		## projects share one app_userdata dir, so another editor's walk can
+		## clear or overwrite the pid-file, and blind-spawning here produced
+		## the reproduced duplicate-spawn + 4003 token loop. A live godot-ai
+		## answer forces the adopt/recover branch below; an unresponsive
+		## port falls through to the normal spawn path at the cost of one
+		## fast connection-refused probe (off-thread in production).
 		var evidence_result: Variant = await _run_blocking(func() -> Variant:
 			if not is_instance_valid(_host):
-				return {}
-			if not _host._managed_server_evidence_alive():
 				return {}
 			return _host._probe_live_server_status_for_port(port)
 		)
@@ -692,8 +701,29 @@ func _start_server_impl(async_gen: int) -> void:
 			_server_actual_name = "godot-ai"
 			_server_actual_version = live_version
 			_can_recover_incompatible = false
-			var owner := int(_host._find_managed_pid(port))
-			var owner_label := adopt_compatible_server(record_version, current_version, owner)
+			## A matching version is compatibility evidence, not ownership
+			## evidence (#759/#764). A stale EditorSettings record can name a
+			## dead PID while an unrelated compatible server owns the port.
+			## Retain managed ownership only when the recorded PID is itself
+			## the live, branded listener.
+			var adoption_proof_result: Variant = await _run_blocking(func() -> Variant:
+				if not is_instance_valid(_host):
+					return {"proof": "", "pids": []}
+				return _host._evaluate_strong_port_occupant_proof(port, live, record)
+			)
+			if _async_stale(async_gen):
+				return
+			var adoption_proof: Dictionary = adoption_proof_result
+			var proof_pids: Array[int] = []
+			proof_pids.assign(adoption_proof.get("pids", []))
+			var owner := int(proof_pids[0]) if not proof_pids.is_empty() else 0
+			var record_owns_listener := str(adoption_proof.get("proof", "")) == "managed_record"
+			var owner_label := adopt_compatible_server(
+				record_version,
+				current_version,
+				owner,
+				record_owns_listener
+			)
 			_host._server_started_this_session = true
 			_startup_path = McpStartupPathScript.ADOPTED
 			transition_state(McpServerStateScript.READY)
@@ -899,42 +929,78 @@ func check_server_health() -> void:
 	var spawn_pid := int(_server_pid)
 	if real_pid > 0 and real_pid != spawn_pid and PortResolver.pid_alive(real_pid):
 		_server_pid = real_pid
+		## The spawn record initially contains the launcher PID so same-session
+		## teardown can kill it. Heal it as soon as the server publishes its
+		## authoritative PID; future adoption requires the recorded PID to be
+		## the actual live listener (#759).
+		_host._write_managed_server_record(real_pid, _expected_server_version())
 	elif not PortResolver.pid_alive(spawn_pid):
 		if elapsed >= int(_host.SPAWN_GRACE_MS) and not McpServerStateScript.is_terminal_diagnosis(_server_state):
-			## #647: the server died inside the grace window. If a foreign
-			## (non-godot-ai) process holds the HTTP or WS port, the server
-			## exited fast with its "port already in use" stderr message and
-			## EXIT_PORT_IN_USE — but we can't read the child's stderr, so
-			## re-probe the ports and surface FOREIGN_PORT with an actionable
-			## message instead of a bare CRASHED pointing at the output log.
-			## Checked before the --refresh retry: respawning against an
-			## occupied port can only fail the same way.
-			var conflict := _diagnose_spawn_port_conflict()
-			if not conflict.is_empty():
-				_server_exit_ms = elapsed
-				_server_status_message = str(conflict.get("message", ""))
-				_conflict_port = int(conflict.get("port", 0))
-				set_terminal_diagnosis(McpServerStateScript.FOREIGN_PORT)
-				disarm_version_check()
-				_host._update_process_enabled()
-				_host._log_buffer.log(str(_server_status_message))
-				push_warning("MCP | %s" % _server_status_message)
-				_host._stop_server_watch()
-				return
-			if bool(_host._should_retry_with_refresh()):
-				_refresh_retried = true
-				respawn_with_refresh()
-				return
-			_server_exit_ms = elapsed
-			set_terminal_diagnosis(McpServerStateScript.CRASHED)
-			disarm_version_check()
-			_host._update_process_enabled()
-			_host._log_buffer.log("server exited after %dms — see Godot output log" % int(_server_exit_ms))
-			_host._stop_server_watch()
+			_diagnose_spawn_fast_exit(elapsed)
 		return
 	if elapsed >= int(_host.SERVER_WATCH_MS):
 		## Survived startup — mid-session crashes surface via WebSocket disconnect.
 		_host._stop_server_watch()
+
+
+## The spawned server died inside the SPAWN_GRACE_MS window. Decide what
+## that means, in order:
+##   1. A live godot-ai server answers on the HTTP port -> our spawn lost
+##      a port race the bind probe never saw (#745 bind-trap: the walk
+##      thought the port was free, the duplicate exited unable to bind,
+##      and the token it staged in the record is now stale). Re-run the
+##      startup walk so the adopt/recover branch handles the survivor —
+##      latching CRASHED here left the connection redialing forever with
+##      a token the surviving server rejects (close code 4003). One-shot
+##      per walk via `_readopt_after_spawn_exit_retried`.
+##   2. #647: foreign process on the HTTP or WS port -> FOREIGN_PORT with
+##      an actionable message (we can't read the child's "port already in
+##      use" stderr). Checked before the --refresh retry: respawning
+##      against an occupied port can only fail the same way.
+##   3. #172: stale uvx index -> one `--refresh` respawn.
+##   4. Otherwise -> CRASHED, pointing at the Godot output log.
+func _diagnose_spawn_fast_exit(elapsed: int) -> void:
+	var live: Dictionary = _host._probe_live_server_status_for_port(
+		ClientConfigurator.http_port()
+	)
+	if _live_status_identifies_godot_ai(live) and not _readopt_after_spawn_exit_retried:
+		_readopt_after_spawn_exit_retried = true
+		_host._log_buffer.log(
+			"server exited after %dms but a live godot-ai server answers on port %d — re-running adoption"
+			% [elapsed, ClientConfigurator.http_port()]
+		)
+		_host._stop_server_watch()
+		_server_pid = -1
+		## Clear the spawn guard so the re-walk isn't GUARDED away. The
+		## walk's adopt arm re-sets it and fixes the stale token/record
+		## (external adoption drops both; managed adoption re-records).
+		_host._server_started_this_session = false
+		## Fire-and-forget (mirrors force_restart_server): the walk is a
+		## coroutine in production; its continuation lives on the manager.
+		start_server()
+		return
+	var conflict := _diagnose_spawn_port_conflict(live)
+	if not conflict.is_empty():
+		_server_exit_ms = elapsed
+		_server_status_message = str(conflict.get("message", ""))
+		_conflict_port = int(conflict.get("port", 0))
+		set_terminal_diagnosis(McpServerStateScript.FOREIGN_PORT)
+		disarm_version_check()
+		_host._update_process_enabled()
+		_host._log_buffer.log(str(_server_status_message))
+		push_warning("MCP | %s" % _server_status_message)
+		_host._stop_server_watch()
+		return
+	if bool(_host._should_retry_with_refresh()):
+		_refresh_retried = true
+		respawn_with_refresh()
+		return
+	_server_exit_ms = elapsed
+	set_terminal_diagnosis(McpServerStateScript.CRASHED)
+	disarm_version_check()
+	_host._update_process_enabled()
+	_host._log_buffer.log("server exited after %dms — see Godot output log" % int(_server_exit_ms))
+	_host._stop_server_watch()
 
 
 ## #647: post-crash port-conflict probe. Returns `{}` when no foreign
@@ -942,12 +1008,19 @@ func check_server_health() -> void:
 ## `{"message": String, "port": int}` when the HTTP or WS port is held by
 ## a process we can't identify as godot-ai. An occupant that *does*
 ## identify as godot-ai is deliberately not diagnosed here — that's the
-## stale-server / adoption territory handled by the next `start_server`
-## walk, not a foreign conflict.
-func _diagnose_spawn_port_conflict() -> Dictionary:
+## stale-server / adoption territory handled by `_diagnose_spawn_fast_exit`'s
+## re-adopt arm (or the next `start_server` walk), not a foreign conflict.
+## `pre_probed_live`: an HTTP status snapshot the caller already has on
+## hand; non-empty skips the internal ~500ms probe (the probe helper never
+## returns a bare `{}`, so the sentinel is unambiguous).
+func _diagnose_spawn_port_conflict(pre_probed_live: Dictionary = {}) -> Dictionary:
 	var http_port := ClientConfigurator.http_port()
 	if bool(_host._is_port_in_use(http_port)):
-		var live: Dictionary = _host._probe_live_server_status_for_port(http_port)
+		var live: Dictionary = (
+			pre_probed_live
+			if not pre_probed_live.is_empty()
+			else _host._probe_live_server_status_for_port(http_port)
+		)
 		if _live_status_identifies_godot_ai(live):
 			return {}
 		return {
@@ -1013,13 +1086,20 @@ func respawn_with_refresh() -> void:
 		_host._stop_server_watch()
 
 
-func adopt_compatible_server(record_version: String, current_version: String, owner: int) -> String:
+func adopt_compatible_server(
+	record_version: String,
+	current_version: String,
+	owner: int,
+	record_owns_listener: bool = false
+) -> String:
 	_server_actual_name = "godot-ai"
 	_can_recover_incompatible = false
-	if record_version == current_version and owner > 0:
+	if record_version == current_version and owner > 0 and record_owns_listener:
 		## Managed adoption keeps the record's token (loaded into
 		## _ws_auth_token at plugin startup) — the running server was
-		## spawned with it and still verifies against it (#690).
+		## spawned with it and still verifies against it (#690). Version
+		## equality alone is deliberately insufficient: the record must also
+		## identify the live branded listener (#759/#764).
 		_server_pid = owner
 		_host._write_managed_server_record(owner, current_version)
 		return McpAdoptionLabelScript.MANAGED

@@ -20,6 +20,14 @@ const OUTBOUND_BUFFER_LIMIT_BYTES := 4 * 1024 * 1024
 ## next frame; the cumulative spill counter is logged so flood patterns
 ## are observable in `logs_read`. See audit-v2 finding #12 (issue #356).
 const PACKET_DRAIN_CAP_PER_TICK := 32
+## Mirror of the server's application close code for a handshake carrying a
+## wrong auth token (#690; `websocket.py::_CLOSE_CODE_AUTH_TOKEN_MISMATCH`).
+const CLOSE_CODE_AUTH_TOKEN_MISMATCH := 4003
+## After this many consecutive post-OPEN token-mismatch rejections, drop the
+## token and handshake token-less (see `_note_post_open_close`). Two, not
+## one: a transient stale-record race during a server swap gets one chance
+## to resolve before the token is given up.
+const AUTH_MISMATCH_FALLBACK_CLOSES := 2
 const ClientConfigurator := preload("res://addons/godot_ai/client_configurator.gd")
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 
@@ -31,9 +39,11 @@ const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 signal connection_state_changed(is_open: bool)
 
 var _peer := WebSocketPeer.new()
-## Set by plugin.gd after resolving the configured WebSocket port once for the
-## server spawn. Reconnects reuse this cached value so they keep dialing the
-## same port the Python server was asked to bind.
+## Seeded by plugin.gd from the configured EditorSettings port before the
+## first dial, then republished with the fully resolved port once the
+## deferred startup walk (#678) finishes resolving/spawning. Each connect
+## attempt recomputes the URL from the latest value, so reconnects keep
+## dialing the port the Python server was asked to bind.
 var ws_port := ClientConfigurator.DEFAULT_WS_PORT
 ## Per-launch handshake auth token (#690). Set by plugin.gd from the value
 ## it generated for the server spawn (also persisted in the managed-server
@@ -45,7 +55,15 @@ var _url := ""
 var _connected := false
 var _reconnect_attempt := 0
 var _reconnect_timer := 0.0
+## One pre-OPEN failure diagnostic per WebSocketPeer. Without this guard the
+## CLOSED state is polled every frame and would flood the editor log.
+var _preopen_failure_logged_for_peer := false
 var _session_id := ""
+## Consecutive post-OPEN closes with CLOSE_CODE_AUTH_TOKEN_MISMATCH. NOT
+## reset by `_clear_on_disconnect` — the streak is counted exactly at the
+## close events it exists to observe, across reconnect attempts. Reset on
+## any other close code and on a successful `handshake_ack`.
+var _auth_mismatch_closes := 0
 ## Godot-AI Python package version reported by the server in its `handshake_ack`
 ## reply. Empty until the ack lands. Older servers (pre-handshake_ack) leave
 ## this empty forever — callers that gate on it (the dock's mismatch banner)
@@ -138,10 +156,30 @@ func _process(delta: float) -> void:
 		WebSocketPeer.STATE_CLOSED:
 			if _connected:
 				_connected = false
+				## This peer reached OPEN, so its one close diagnostic is the
+				## post-OPEN line below. Mark the peer consumed; otherwise a
+				## stale reconnect delay leaves it in CLOSED for another frame
+				## and the pre-OPEN branch emits a mislabeled duplicate.
+				_preopen_failure_logged_for_peer = true
 				_clear_on_disconnect()
 				var code := _peer.get_close_code()
-				log_buffer.log("disconnected (code %d)" % code)
+				var reason := _peer.get_close_reason()
+				log_buffer.log(_close_diagnostic(true, code, reason, _url))
+				_note_post_open_close(code)
 				connection_state_changed.emit(false)
+			elif not _preopen_failure_logged_for_peer:
+				_preopen_failure_logged_for_peer = true
+				## Initial failure is attempt 1 for diagnostics. Later failures
+				## follow the same first-five/each-tenth throttle as reconnect
+				## progress so a missing listener stays observable but bounded.
+				var failed_attempt := maxi(1, _reconnect_attempt)
+				if _should_log_reconnect_attempt(failed_attempt):
+					log_buffer.log(_close_diagnostic(
+						false,
+						_peer.get_close_code(),
+						_peer.get_close_reason(),
+						_url
+					))
 			_reconnect_timer -= delta
 			if _reconnect_timer <= 0.0:
 				_attempt_reconnect()
@@ -193,6 +231,10 @@ func disconnect_from_server() -> void:
 	if _connected:
 		_peer.close(1000, "Plugin unloading")
 		_connected = false
+		## This peer reached OPEN and is being closed deliberately, so neither
+		## the post-OPEN nor pre-OPEN close diagnostic applies. Consume its one
+		## diagnostic before the CLOSED tick observes the pre-cleared flag.
+		_preopen_failure_logged_for_peer = true
 		## Pre-clearing _connected makes the STATE_CLOSED branch skip its
 		## _clear_on_disconnect() — run it here so deliberate closes don't
 		## leak the old server's version/deferred state into the next one.
@@ -254,6 +296,7 @@ func _attempt_reconnect() -> void:
 	## reached STATE_CLOSED is terminal; reusing it can leave the editor stuck in
 	## a quiet reconnect loop after the Python server restarts.
 	_peer = WebSocketPeer.new()
+	_preopen_failure_logged_for_peer = false
 	_peer.outbound_buffer_size = OUTBOUND_BUFFER_LIMIT_BYTES
 	## Keep the reconnect peer symmetric with _ready()'s (#690).
 	_peer.inbound_buffer_size = OUTBOUND_BUFFER_LIMIT_BYTES
@@ -284,6 +327,49 @@ static func _should_log_reconnect_attempt(attempt_number: int) -> bool:
 		attempt_number <= RECONNECT_VERBOSE_ATTEMPTS
 		or attempt_number % RECONNECT_LOG_EVERY_N_ATTEMPTS == 0
 	)
+
+
+static func _close_diagnostic(
+	reached_open: bool,
+	code: int,
+	reason: String,
+	url: String
+) -> String:
+	var phase := "disconnected after OPEN" if reached_open else "connection failed before OPEN"
+	var reason_label := reason.strip_edges()
+	if reason_label.is_empty():
+		reason_label = "<none>"
+	else:
+		reason_label = reason_label.replace("\r", "\\r").replace("\n", "\\n")
+	return "%s (code %d, reason %s, url %s)" % [phase, code, reason_label, url]
+
+
+## Token-mismatch fallback (#690 follow-up). The server's auth token is
+## fixed for its whole launch, so redialing with the same wrong token can
+## never succeed — without this the reconnect loop 4003s forever. The
+## reproduced multi-editor failure: a duplicate spawn overwrites the shared
+## managed-server record with its fresh token, dies unable to bind, and
+## this editor is left holding a token the surviving server never saw.
+## After AUTH_MISMATCH_FALLBACK_CLOSES consecutive rejections, drop to a
+## token-less handshake, which the server accepts by design (older plugins
+## and adopted servers have no token, and the field is attacker-omittable —
+## see websocket.py; omitting it gives up no security). Scope note: only
+## this connection's copy of the token is dropped — the plugin static and
+## the persisted record heal via the startup walk's adoption arms.
+func _note_post_open_close(code: int) -> void:
+	if code != CLOSE_CODE_AUTH_TOKEN_MISMATCH or auth_token.is_empty():
+		_auth_mismatch_closes = 0
+		return
+	_auth_mismatch_closes += 1
+	if _auth_mismatch_closes < AUTH_MISMATCH_FALLBACK_CLOSES:
+		return
+	auth_token = ""
+	_auth_mismatch_closes = 0
+	if log_buffer:
+		log_buffer.log(
+			"auth token rejected %d times (close code %d) — retrying with a token-less handshake"
+			% [AUTH_MISMATCH_FALLBACK_CLOSES, CLOSE_CODE_AUTH_TOKEN_MISMATCH]
+		)
 
 
 func _log_blocked_notice_once() -> void:
@@ -329,6 +415,9 @@ func _handle_message(raw: String) -> void:
 		return
 	if parsed.get("type", "") == "handshake_ack":
 		server_version = str(parsed.get("server_version", ""))
+		## The server accepted our handshake — any token-mismatch streak is
+		## over; a later unrelated 4003 starts a fresh one.
+		_auth_mismatch_closes = 0
 		return
 	if parsed.has("request_id") and parsed.has("command"):
 		if (

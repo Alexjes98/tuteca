@@ -13,7 +13,15 @@ const POUNCE_FORCE    := 12.0   # Horizontal burst strength
 const POUNCE_UP_KICK  := 2.5    # Upward component added on pounce
 const POUNCE_COOLDOWN := 2.0    # Seconds between pounces
 
+const WALL_BOUNCE_HORIZ_FORCE := 12.0  # Horizontal impulse vector away from wall
+const WALL_BOUNCE_UP_FORCE    := 10.0  # Vertical jump kick on wall bounce
+const WALL_GRACE_TIME         := 0.15  # Seconds after losing wall contact to allow jump
+
 var _pounce_timer: float = 0.0   # Counts down to 0 when cooldown is active
+
+var _can_wall_bounce: bool = true
+var _wall_contact_timer: float = 0.0
+var _last_wall_normal: Vector3 = Vector3.ZERO
 
 var _scratch_cast: ShapeCast3D
 var _default_fov: float = 75.0
@@ -91,13 +99,59 @@ func _do_pounce() -> void:
 	print("[Cat] Pounce! Cooldown: %.1fs" % POUNCE_COOLDOWN)
 
 # ─────────────────────────────────────────────────────────────────────────────
-## Override jump velocity to make the giant cat jump much higher.
+## Handles floor jump override, wall contact tracking, and mid-air wall bounce.
 func _process_movement(delta: float) -> void:
+	if _wall_contact_timer > 0.0:
+		_wall_contact_timer = max(_wall_contact_timer - delta, 0.0)
+
+	if is_on_floor():
+		_can_wall_bounce = true
+
+	# Detect wall bounce jump input while airborne
+	if not is_on_floor() and _can_wall_bounce and Input.is_action_just_pressed("jump"):
+		var wall_norm := Vector3.ZERO
+		if is_on_wall():
+			wall_norm = get_wall_normal()
+		elif _wall_contact_timer > 0.0:
+			wall_norm = _last_wall_normal
+
+		if wall_norm != Vector3.ZERO:
+			_do_wall_bounce(wall_norm)
+
 	# Call base movement (handles gravity, WASD, etc.)
 	super(delta)
+
 	# If we pressed jump this frame and are on floor, override velocity.y
 	if Input.is_action_pressed("jump") and is_on_floor():
 		velocity.y = 10.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Called after move_and_slide() to refresh wall normal while airborne.
+func _post_physics() -> void:
+	if not is_on_floor() and is_on_wall():
+		_last_wall_normal = get_wall_normal()
+		_wall_contact_timer = WALL_GRACE_TIME
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Performs the wall bounce: launches away from wall_normal with vertical lift.
+func _do_wall_bounce(wall_normal: Vector3) -> void:
+	var horiz_dir := Vector3(wall_normal.x, 0.0, wall_normal.z).normalized()
+	if horiz_dir.length_squared() == 0.0:
+		horiz_dir = -_model_root.transform.basis.z.normalized()
+
+	velocity.x = horiz_dir.x * WALL_BOUNCE_HORIZ_FORCE
+	velocity.z = horiz_dir.z * WALL_BOUNCE_HORIZ_FORCE
+	velocity.y = WALL_BOUNCE_UP_FORCE
+
+	_can_wall_bounce = false
+	_wall_contact_timer = 0.0
+
+	_face_direction(horiz_dir, get_process_delta_time())
+
+	if is_multiplayer_authority() and camera:
+		camera.fov = 85.0
+
+	print("[Cat] Wall Bounce! Direction: %s" % horiz_dir)
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Scratch: detects targets in front and applies a multiplayer knockback.
