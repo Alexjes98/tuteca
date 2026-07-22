@@ -14,8 +14,11 @@ const POUNCE_UP_KICK  := 2.5    # Upward component added on pounce
 const POUNCE_COOLDOWN := 2.0    # Seconds between pounces
 
 const WALL_BOUNCE_HORIZ_FORCE := 12.0  # Horizontal impulse vector away from wall
-const WALL_BOUNCE_UP_FORCE    := 10.0  # Vertical jump kick on wall bounce
+const WALL_BOUNCE_UP_FORCE    := 11.0  # Vertical jump kick on wall bounce
 const WALL_GRACE_TIME         := 0.15  # Seconds after losing wall contact to allow jump
+const CAT_JUMP_VELOCITY       := 12.0  # Vertical floor jump strength
+const RISING_GRAVITY_MULTIPLIER  := 2.2  # Gravity multiplier while ascending
+const FALLING_GRAVITY_MULTIPLIER := 2.8  # Gravity multiplier while descending
 
 var _pounce_timer: float = 0.0   # Counts down to 0 when cooldown is active
 
@@ -121,9 +124,14 @@ func _process_movement(delta: float) -> void:
 	# Call base movement (handles gravity, WASD, etc.)
 	super(delta)
 
-	# If we pressed jump this frame and are on floor, override velocity.y
+	# Override floor jump velocity with cat jump velocity
 	if Input.is_action_pressed("jump") and is_on_floor():
-		velocity.y = 10.0
+		velocity.y = CAT_JUMP_VELOCITY
+
+	# Apply extra gravity so jumping feels snappy and grounded ("normal" vs floaty moon gravity)
+	if not is_on_floor():
+		var mult := RISING_GRAVITY_MULTIPLIER if velocity.y > 0.0 else FALLING_GRAVITY_MULTIPLIER
+		velocity += get_gravity() * (mult - 1.0) * delta
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Called after move_and_slide() to refresh wall normal while airborne.
