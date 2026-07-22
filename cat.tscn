@@ -4,19 +4,27 @@
 [ext_resource type="Script" path="res://scripts/cat.gd" id="2_script"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_cat"]
-radius = 0.3
-height = 0.9
+radius = 0.22
+height = 0.57
 
 [node name="CharacterBody3D" type="CharacterBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.87753415, 5.7945185)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.32, 5.7945185)
 script = ExtResource("2_script")
 
-[node name="Cat" parent="." instance=ExtResource("1_cat")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.45, 0)
+[node name="ModelRoot" type="Node3D" parent="."]
+transform = Transform3D(18, 0, 0, 0, 18, 0, 0, 0, 18, 0, -0.285, 0)
+
+[node name="Cat" parent="ModelRoot" instance=ExtResource("1_cat")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0, 0)
 shape = SubResource("CapsuleShape3D_cat")
 
-[node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+[node name="CameraPivot" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
+spring_length = 1.9
+margin = 0.1
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
