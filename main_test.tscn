@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://ddnvcfccasiaw"]
 
 [ext_resource type="Script" uid="uid://cp41xxxu2lcs4" path="res://main_test.gd" id="2_script"]
+[ext_resource type="Script" path="res://scripts/map_generator.gd" id="3_script"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_34120"]
 
@@ -21,6 +22,7 @@ script = ExtResource("2_script")
 transform = Transform3D(0.25881907, -0.2984875, 0.9186501, 0, 0.95105654, 0.30901703, -0.9659258, -0.0799795, 0.24615158, 2.3922, 1.7594593, 6.247422)
 
 [node name="Map" type="Node3D" parent="." unique_id=1897555832]
+script = ExtResource("3_script")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Map" unique_id=1389413648]
 transform = Transform3D(8.81, 0, 0, 0, 8.81, 0, 0, 0, 8.81, -0.030049324, 0.012003899, 0.0066108704)
