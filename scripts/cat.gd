@@ -91,6 +91,15 @@ func _do_pounce() -> void:
 	print("[Cat] Pounce! Cooldown: %.1fs" % POUNCE_COOLDOWN)
 
 # ─────────────────────────────────────────────────────────────────────────────
+## Override jump velocity to make the giant cat jump much higher.
+func _process_movement(delta: float) -> void:
+	# Call base movement (handles gravity, WASD, etc.)
+	super(delta)
+	# If we pressed jump this frame and are on floor, override velocity.y
+	if Input.is_action_pressed("jump") and is_on_floor():
+		velocity.y = 10.0
+
+# ─────────────────────────────────────────────────────────────────────────────
 ## Scratch: detects targets in front and applies a multiplayer knockback.
 func _do_scratch() -> void:
 	print("[Cat] Scratch triggered!")
