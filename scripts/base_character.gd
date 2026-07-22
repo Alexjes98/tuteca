@@ -43,7 +43,20 @@ func _ready() -> void:
 	_spring_arm.add_excluded_object(get_rid())
 	_cam_pivot.rotation.x = _pitch
 	# Node name == peer_id (assigned by server spawner)
-	set_multiplayer_authority(int(name))
+	var peer_id := int(name)
+	set_multiplayer_authority(peer_id)
+	
+	# Instantiate and configure MultiplayerSynchronizer
+	var synchronizer := MultiplayerSynchronizer.new()
+	var config := SceneReplicationConfig.new()
+	config.add_property(".:position")
+	config.add_property(".:rotation")
+	synchronizer.replication_config = config
+	synchronizer.root_path = get_path()
+	# Set authority to match the character controller peer
+	synchronizer.set_multiplayer_authority(peer_id)
+	add_child(synchronizer)
+
 	if is_multiplayer_authority():
 		camera.make_current()
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
@@ -104,8 +117,16 @@ func _process_movement(delta: float) -> void:
 
 	var direction := Vector3(raw.x, 0.0, raw.y).rotated(Vector3.UP, _cam_pivot.rotation.y)
 	if direction.length_squared() > 0.0:
-		velocity.x = direction.x * SPEED
-		velocity.z = direction.z * SPEED
+		var target_vel := direction * SPEED
+		var current_horiz := Vector3(velocity.x, 0.0, velocity.z)
+		if current_horiz.length() > SPEED + 0.1:
+			# Smoothly decay high velocities (like pounces) back to walk speed (longer decay)
+			current_horiz = current_horiz.move_toward(target_vel, 15.0 * delta)
+			velocity.x = current_horiz.x
+			velocity.z = current_horiz.z
+		else:
+			velocity.x = target_vel.x
+			velocity.z = target_vel.z
 		_face_direction(direction, delta)
 	else:
 		velocity.x = move_toward(velocity.x, 0.0, SPEED)
@@ -127,3 +148,44 @@ func _process_special(_delta: float) -> void:
 ## Called after move_and_slide() each frame. Override for post-physics work.
 func _post_physics() -> void:
 	pass
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Multi-player knockback implementation.
+@rpc("any_peer", "call_local", "reliable")
+func rpc_apply_knockback(force: Vector3) -> void:
+	if is_multiplayer_authority():
+		velocity += force
+		print("[%s] Received knockback: %s" % [name, force])
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Spawns a temporary particle explosion at the specified position.
+@rpc("any_peer", "call_local", "reliable")
+func rpc_spawn_explosion(pos: Vector3) -> void:
+	var particles := CPUParticles3D.new()
+	var sphere_mesh := SphereMesh.new()
+	sphere_mesh.radius = 0.2
+	sphere_mesh.height = 0.4
+	
+	var material := StandardMaterial3D.new()
+	material.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(1.0, 0.3, 0.05)  # Bright fire orange
+	sphere_mesh.material = material
+	
+	particles.mesh = sphere_mesh
+	particles.emitting = false
+	particles.one_shot = true
+	particles.explosiveness = 1.0
+	particles.amount = 35
+	particles.lifetime = 0.6
+	particles.spread = 180.0
+	particles.initial_velocity_min = 10.0
+	particles.initial_velocity_max = 18.0
+	particles.gravity = Vector3(0, -12.0, 0)  # Gravity pulls sparks down
+	
+	# Add particles to the parent stage node so they stay stationary in the world
+	get_parent().add_child(particles)
+	particles.global_position = pos
+	particles.emitting = true
+	
+	# Automatically clean up node after lifetime ends
+	get_tree().create_timer(particles.lifetime + 0.1).timeout.connect(particles.queue_free)
