@@ -16,7 +16,7 @@ const POUNCE_COOLDOWN := 2.0    # Seconds between pounces
 const WALL_BOUNCE_HORIZ_FORCE := 12.0  # Horizontal impulse vector away from wall
 const WALL_BOUNCE_UP_FORCE    := 11.0  # Vertical jump kick on wall bounce
 const WALL_GRACE_TIME         := 0.15  # Seconds after losing wall contact to allow jump
-const CAT_JUMP_VELOCITY       := 12.0  # Vertical floor jump strength
+const CAT_JUMP_VELOCITY       := 20.0  # Vertical floor jump strength
 const RISING_GRAVITY_MULTIPLIER  := 2.2  # Gravity multiplier while ascending
 const FALLING_GRAVITY_MULTIPLIER := 2.8  # Gravity multiplier while descending
 
