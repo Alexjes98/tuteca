@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://n6mjc65jrdso"]
+
+[ext_resource type="PackedScene" uid="uid://bdr0wxagfethy" path="res://assets/3D/grillo.glb" id="1_0hqrf"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_34120"]
+radius = 0.21303749
+
+[node name="Node3D" type="Node3D" unique_id=988670744]
+
+[node name="CharacterBody3D" type="CharacterBody3D" parent="." unique_id=360759627]
+
+[node name="Node3D" type="Node3D" parent="CharacterBody3D" unique_id=334600695]
+
+[node name="grillo" parent="CharacterBody3D/Node3D" unique_id=285511642 instance=ExtResource("1_0hqrf")]
+transform = Transform3D(0.33, 0, 0, 0, 0.33, 0, 0, 0, 0.33, 0, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CharacterBody3D" unique_id=549522383]
+shape = SubResource("SphereShape3D_34120")

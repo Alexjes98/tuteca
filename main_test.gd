@@ -19,9 +19,10 @@ const MAX_PEERS  := 8
 @onready var cat_btn         : Button             = $CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/CharacterRow/CatButton
 @onready var players         : Node3D             = $Players
 @onready var spawner         : MultiplayerSpawner = $MultiplayerSpawner
+@onready var cricket_spawner : Node3D             = $CricketSpawner
 
-var _player_scene := preload("res://player.tscn")
-var _cat_scene    := preload("res://cat.tscn")
+var _player_scene := preload("res://game_objects/tuteca.tscn")
+var _cat_scene    := preload("res://game_objects/cat.tscn")
 
 ## The character this local player has chosen.
 var _chosen_character: String = "gekko"
@@ -152,3 +153,5 @@ func _spawn_player(id: int) -> void:
 	var character: String = _peer_characters.get(id, "gekko")
 	spawner.spawn({"peer_id": id, "character": character})
 	print("[Server] Spawned %s for peer %d" % [character, id])
+	if cricket_spawner and cricket_spawner.has_method("spawn_crickets_for_scene"):
+		cricket_spawner.spawn_crickets_for_scene()

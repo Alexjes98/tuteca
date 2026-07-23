@@ -21,7 +21,7 @@ const MODEL_LERP    := 14.0   # How fast the model re-aligns to the surface
 const HOVER         := 0.24   # Capsule-center height above the surface
 const GROUND_RAY    := 0.55   # Down-probe length (along -surface_normal)
 const FWD_RAY       := 0.45   # Forward-probe length (wall detection)
-const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from player.tscn
+const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from tuteca.tscn
 const STICK_COOLDOWN := 0.18  # Seconds after a jump before we may re-stick
 
 # ── Surface-walking state ─────────────────────────────────────────────────────
