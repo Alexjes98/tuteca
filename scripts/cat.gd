@@ -9,9 +9,9 @@ extends "res://scripts/base_character.gd"
 ## Both abilities are ready to be expanded with animations, hit detection,
 ## sound effects, or state-machine transitions.
 
-const POUNCE_FORCE    := 12.0   # Horizontal burst strength
-const POUNCE_UP_KICK  := 2.5    # Upward component added on pounce
-const POUNCE_COOLDOWN := 2.0    # Seconds between pounces
+const POUNCE_FORCE    := 26.0   # Horizontal burst strength
+const POUNCE_UP_KICK  := 10.0   # Upward component added on pounce (high arc)
+const POUNCE_COOLDOWN := 3.0    # Seconds between pounces
 
 const WALL_BOUNCE_HORIZ_FORCE := 12.0  # Horizontal impulse vector away from wall
 const WALL_BOUNCE_UP_FORCE    := 11.0  # Vertical jump kick on wall bounce
@@ -30,9 +30,18 @@ var _scratch_cast: ShapeCast3D
 var _default_fov: float = 75.0
 var _shift_down: bool = false
 
+# UI references
+@onready var cat_ui: CanvasLayer = $CatUI
+@onready var cooldown_indicator: Control = $CatUI/CooldownIndicator
+@onready var fill_color: ColorRect = $CatUI/CooldownIndicator/FillColor
+
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	super()
+	SPEED = 8.5
+	
+	# Only show the local Cat UI to the controlling player
+	cat_ui.visible = is_multiplayer_authority()
 	
 	if is_multiplayer_authority() and camera:
 		_default_fov = camera.fov
@@ -59,6 +68,15 @@ func _process_special(delta: float) -> void:
 	# Tick down the pounce cooldown
 	if _pounce_timer > 0.0:
 		_pounce_timer = max(_pounce_timer - delta, 0.0)
+		
+	# Update the cooldown indicator bar locally
+	if is_multiplayer_authority():
+		if _pounce_timer > 0.0:
+			cooldown_indicator.visible = true
+			var progress := 1.0 - (_pounce_timer / POUNCE_COOLDOWN)
+			fill_color.size.x = 120.0 * progress
+		else:
+			cooldown_indicator.visible = false
 
 	# Smoothly return camera FOV to default after a pounce stretch (longer transition)
 	if is_multiplayer_authority() and camera and camera.fov > _default_fov:
@@ -200,3 +218,10 @@ func _do_scratch() -> void:
 					# Spawn explosion on all peers at hit location
 					rpc_spawn_explosion.rpc(hit_collider.global_position)
 					print("[Cat] Hit %s! Applying knockback: %s" % [hit_collider.name, knockback_force])
+					
+					# Check if target is a lizard and report capture to server
+					if hit_collider.is_in_group("lizards"):
+						var main_node = get_tree().current_scene
+						if main_node and main_node.has_method("rpc_capture_player"):
+							var target_peer_id = int(hit_collider.name)
+							main_node.rpc_capture_player.rpc_id(1, target_peer_id)

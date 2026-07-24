@@ -158,5 +158,80 @@ text = "Host"
 layout_mode = 2
 text = "Join"
 
+[node name="HUD" type="Control" parent="CanvasLayer" unique_id=988670111]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="CanvasLayer/HUD" unique_id=988670112]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 50.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/HUD/MarginContainer" unique_id=988670113]
+layout_mode = 2
+theme_override_constants/separation = 40
+alignment = 1
+
+[node name="TimerLabel" type="Label" parent="CanvasLayer/HUD/MarginContainer/HBoxContainer" unique_id=988670114]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Time: 2:00"
+
+[node name="CricketsLabel" type="Label" parent="CanvasLayer/HUD/MarginContainer/HBoxContainer" unique_id=988670115]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Crickets: 0/0"
+
+[node name="LizardsLabel" type="Label" parent="CanvasLayer/HUD/MarginContainer/HBoxContainer" unique_id=988670116]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Lizards: 0/0"
+
+[node name="GameOverPanel" type="ColorRect" parent="CanvasLayer" unique_id=988670117]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.784314)
+
+[node name="CenterContainer" type="CenterContainer" parent="CanvasLayer/GameOverPanel" unique_id=988670118]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/GameOverPanel/CenterContainer" unique_id=988670119]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="WinLabel" type="Label" parent="CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer" unique_id=988670120]
+layout_mode = 2
+theme_override_font_sizes/font_size = 48
+text = "Cats Win!"
+horizontal_alignment = 1
+
+[node name="RestartLabel" type="Label" parent="CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer" unique_id=988670121]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Restarting in 5 seconds..."
+horizontal_alignment = 1
+
 [connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/HostButton" to="." method="_on_host_pressed"]
 [connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/JoinButton" to="." method="_on_join_pressed"]

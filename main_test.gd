@@ -21,6 +21,23 @@ const MAX_PEERS  := 8
 @onready var spawner         : MultiplayerSpawner = $MultiplayerSpawner
 @onready var cricket_spawner : Node3D             = $CricketSpawner
 
+# HUD & Game state references
+@onready var hud: Control = $CanvasLayer/HUD
+@onready var timer_label: Label = $CanvasLayer/HUD/MarginContainer/HBoxContainer/TimerLabel
+@onready var crickets_label: Label = $CanvasLayer/HUD/MarginContainer/HBoxContainer/CricketsLabel
+@onready var lizards_label: Label = $CanvasLayer/HUD/MarginContainer/HBoxContainer/LizardsLabel
+@onready var game_over_panel: ColorRect = $CanvasLayer/GameOverPanel
+@onready var win_label: Label = $CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer/WinLabel
+
+## Replicated game variables (replicated via MultiplayerSynchronizer)
+var time_left: float = 180.0
+var total_crickets: int = 0
+var eaten_crickets: int = 0
+var total_lizards: int = 0
+var captured_lizards: int = 0
+var game_state: String = "lobby"
+var winner_name: String = ""
+
 var _player_scene := preload("res://game_objects/tuteca.tscn")
 var _cat_scene    := preload("res://game_objects/cat.tscn")
 
@@ -34,9 +51,26 @@ var _peer_characters: Dictionary = {}
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	# Point spawner at the Players container and supply a spawn factory.
-	# spawn_function receives a Dictionary { "peer_id": int, "character": String }.
 	spawner.spawn_path     = spawner.get_path_to(players)
 	spawner.spawn_function = _on_spawner_create
+
+	# Set authority to server (peer 1) for the main scene root
+	set_multiplayer_authority(1)
+
+	# Setup server-replicated game variables via MultiplayerSynchronizer
+	var synchronizer := MultiplayerSynchronizer.new()
+	var config := SceneReplicationConfig.new()
+	config.add_property(".:time_left")
+	config.add_property(".:total_crickets")
+	config.add_property(".:eaten_crickets")
+	config.add_property(".:total_lizards")
+	config.add_property(".:captured_lizards")
+	config.add_property(".:game_state")
+	config.add_property(".:winner_name")
+	synchronizer.replication_config = config
+	synchronizer.root_path = get_path()
+	synchronizer.set_multiplayer_authority(1)
+	add_child(synchronizer)
 
 	# ── Multiplayer signals ───────────────────────────────────────────────
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -111,9 +145,16 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	print("[Net] Peer disconnected: ", id)
+	if _peer_characters.get(id, "") == "gekko":
+		var player_node = players.get_node_or_null(str(id))
+		if player_node:
+			if player_node.captured:
+				captured_lizards = max(0, captured_lizards - 1)
+			total_lizards = max(0, total_lizards - 1)
 	_peer_characters.erase(id)
 	if players.has_node(str(id)):
 		players.get_node(str(id)).queue_free()
+	_check_win_conditions()
 
 func _on_connected_to_server() -> void:
 	print("[Client] Connected! My peer ID: ", multiplayer.get_unique_id())
@@ -153,5 +194,143 @@ func _spawn_player(id: int) -> void:
 	var character: String = _peer_characters.get(id, "gekko")
 	spawner.spawn({"peer_id": id, "character": character})
 	print("[Server] Spawned %s for peer %d" % [character, id])
+	
+	# Update team counts
+	if character == "gekko":
+		total_lizards += 1
+		
+	# Transition from lobby to playing automatically when first player spawns
+	if game_state == "lobby":
+		game_state = "playing"
+		time_left = 180.0
+		eaten_crickets = 0
+		captured_lizards = 0
+		if cricket_spawner and cricket_spawner.has_method("spawn_crickets_for_scene"):
+			cricket_spawner.spawn_crickets_for_scene()
+		# Wait a physics frame for crickets to spawn
+		await get_tree().physics_frame
+		total_crickets = cricket_spawner.get_child_count()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Local Process Loop: updates HUD text and runs server countdown timer
+# ─────────────────────────────────────────────────────────────────────────────
+func _process(delta: float) -> void:
+	# 1. Update UI visibility depending on game state
+	if game_state == "lobby":
+		lobby_ui.show()
+		hud.hide()
+		game_over_panel.hide()
+	elif game_state == "playing":
+		lobby_ui.hide()
+		hud.show()
+		game_over_panel.hide()
+		
+		# Server-side timer tick
+		if multiplayer.is_server():
+			time_left = max(0.0, time_left - delta)
+			if time_left <= 0.0:
+				_end_game("Cats")  # Gekkos ran out of time
+				
+		# Update HUD labels
+		var minutes := int(time_left) / 60
+		var seconds := int(time_left) % 60
+		timer_label.text = "Time: %d:%02d" % [minutes, seconds]
+		crickets_label.text = "Crickets: %d/%d" % [eaten_crickets, total_crickets]
+		lizards_label.text = "Lizards Remaining: %d" % [total_lizards - captured_lizards]
+		
+	elif game_state == "game_over":
+		lobby_ui.hide()
+		hud.hide()
+		game_over_panel.show()
+		win_label.text = "%s Win!" % winner_name
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server-side gameplay logic
+# ─────────────────────────────────────────────────────────────────────────────
+func collect_cricket(cricket_name: String) -> void:
+	if not multiplayer.is_server():
+		return
+		
+	# Replicated deletion across all clients
+	_rpc_delete_cricket.rpc(cricket_name)
+	
+	eaten_crickets += 1
+	print("[Server] Cricket collected: %s. Total: %d/%d" % [cricket_name, eaten_crickets, total_crickets])
+	_check_win_conditions()
+
+@rpc("call_local", "reliable")
+func _rpc_delete_cricket(cricket_name: String) -> void:
+	var cricket_node = cricket_spawner.get_node_or_null(cricket_name)
+	if cricket_node:
+		cricket_node.queue_free()
+
+@rpc("any_peer", "reliable")
+func rpc_capture_player(target_peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+		
+	# Verify sender has authority to capture (sender is a Cat)
+	var sender_id := multiplayer.get_remote_sender_id()
+	var sender_char = _peer_characters.get(sender_id, "")
+	if sender_char != "cat" and sender_id != 1:
+		push_warning("[Server] Non-cat peer %d tried to capture player %d!" % [sender_id, target_peer_id])
+		return
+		
+	var player_node = players.get_node_or_null(str(target_peer_id))
+	if player_node and not player_node.captured:
+		player_node.captured = true
+		captured_lizards += 1
+		print("[Server] Lizard %d captured! Total: %d/%d" % [target_peer_id, captured_lizards, total_lizards])
+		_check_win_conditions()
+
+func _check_win_conditions() -> void:
+	if game_state != "playing":
+		return
+		
+	# 1. Gekkos eat all crickets
+	if total_crickets > 0 and eaten_crickets >= total_crickets:
+		_end_game("Tutecas")
+	# 2. Cat captures all Gekkos
+	elif total_lizards > 0 and captured_lizards >= total_lizards:
+		_end_game("Cats")
+
+func _end_game(winner: String) -> void:
+	game_state = "game_over"
+	winner_name = winner
+	print("[Server] Game Over! Winner: %s" % winner)
+	
+	# Wait 5 seconds and restart
+	await get_tree().create_timer(5.0).timeout
+	_restart_game()
+
+func _restart_game() -> void:
+	if not multiplayer.is_server():
+		return
+		
+	game_state = "playing"
+	time_left = 180.0
+	eaten_crickets = 0
+	captured_lizards = 0
+	winner_name = ""
+	
+	# Spawn new crickets
 	if cricket_spawner and cricket_spawner.has_method("spawn_crickets_for_scene"):
 		cricket_spawner.spawn_crickets_for_scene()
+		
+	await get_tree().physics_frame
+	total_crickets = cricket_spawner.get_child_count()
+	
+	var lizards_count := 0
+	for peer_id in _peer_characters:
+		if _peer_characters[peer_id] == "gekko":
+			lizards_count += 1
+			
+		# Uncapture and respawn players
+		var player_node = players.get_node_or_null(str(peer_id))
+		if player_node:
+			player_node.captured = false
+			# Random position around center
+			player_node.global_position = Vector3(randf_range(-15, 15), 2.0, randf_range(-15, 15))
+			
+	total_lizards = lizards_count
+

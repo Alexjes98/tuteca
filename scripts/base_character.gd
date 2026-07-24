@@ -18,7 +18,7 @@ extends CharacterBody3D
 ##   • _process_special(delta)  — for unique abilities (pounce, scratch…).
 ##   • _post_physics()          — for any work needed after move_and_slide().
 
-const SPEED             := 5.0
+var SPEED               := 5.0
 const JUMP_VELOCITY     := 4.5
 const MOUSE_SENSITIVITY := 0.003
 ## How fast the model turns to face the walking direction (higher = snappier).
@@ -36,12 +36,16 @@ const PITCH_MAX :=  0.5   # ~  30°
 ## Start tilted slightly down so the character is framed on spawn.
 var _pitch: float = -0.35
 
+## Captured state: when true, character is disabled and invisible.
+var captured: bool = false
+var _was_captured: bool = false
+
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	# The spring arm must ignore the player's own collider, otherwise it
 	# retracts to zero length and snaps the camera inside the character.
 	_spring_arm.add_excluded_object(get_rid())
-	_cam_pivot.rotation.x = _pitch
+	_spring_arm.rotation.x = _pitch
 	# Node name == peer_id (assigned by server spawner)
 	var peer_id := int(name)
 	set_multiplayer_authority(peer_id)
@@ -51,6 +55,8 @@ func _ready() -> void:
 	var config := SceneReplicationConfig.new()
 	config.add_property(".:position")
 	config.add_property(".:rotation")
+	config.add_property(".:captured")
+	config.add_property("ModelRoot:rotation")
 	synchronizer.replication_config = config
 	synchronizer.root_path = get_path()
 	# Set authority to match the character controller peer
@@ -63,22 +69,70 @@ func _ready() -> void:
 	else:
 		camera.current = false
 
+func _update_captured_state() -> void:
+	if captured == _was_captured:
+		return
+	_was_captured = captured
+	if captured:
+		if _model_root:
+			_model_root.visible = false
+		collision_layer = 0
+		collision_mask = 0
+		if is_multiplayer_authority():
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	else:
+		if _model_root:
+			_model_root.visible = true
+		collision_layer = 1
+		collision_mask = 1
+
+## Virtual function to retrieve the character's local UP direction.
+## Gekko overrides this to return its current surface normal.
+func _get_camera_up() -> Vector3:
+	return Vector3.UP
+
 # ─────────────────────────────────────────────────────────────────────────────
 func _unhandled_input(event: InputEvent) -> void:
+	if captured:
+		return
 	if not is_multiplayer_authority():
 		return
 	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		return
 	if event is InputEventMouseMotion:
-		# Yaw + pitch both go to the camera pivot only: the body never
-		# rotates, so looking around never changes the walking direction.
-		_cam_pivot.rotation.y -= event.relative.x * MOUSE_SENSITIVITY
-		_pitch = clamp(_pitch - event.relative.y * MOUSE_SENSITIVITY,
-				PITCH_MIN, PITCH_MAX)
-		_cam_pivot.rotation.x = _pitch
+		# Yaw: rotate the CameraPivot around its local Y axis (surface normal)
+		var local_y := _cam_pivot.global_transform.basis.y.normalized()
+		_cam_pivot.global_transform.basis = _cam_pivot.global_transform.basis.rotated(local_y, -event.relative.x * MOUSE_SENSITIVITY).orthonormalized()
+		
+		# Pitch: clamp and set on child SpringArm3D
+		_pitch = clamp(_pitch - event.relative.y * MOUSE_SENSITIVITY, PITCH_MIN, PITCH_MAX)
+		_spring_arm.rotation.x = _pitch
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _physics_process(delta: float) -> void:
+	_update_captured_state()
+	
+	if captured:
+		velocity = Vector3.ZERO
+		return
+		
+	# Smoothly align camera pivot's local up vector with the character's surface normal
+	var current_up := _cam_pivot.global_transform.basis.y.normalized()
+	var target_up := _get_camera_up()
+	var axis := current_up.cross(target_up)
+	
+	if current_up.dot(target_up) < -0.99:
+		# Opposing vectors (anti-parallel): use local X-axis to flip 180 degrees upright
+		var fallback_axis := _cam_pivot.global_transform.basis.x.normalized()
+		var rotation_step := minf(PI, 12.0 * delta)
+		_cam_pivot.global_transform.basis = _cam_pivot.global_transform.basis.rotated(fallback_axis, rotation_step).orthonormalized()
+	elif axis.length() > 0.001:
+		axis = axis.normalized()
+		var angle := current_up.angle_to(target_up)
+		# Interpolate rotation smoothly so the camera doesn't snap abruptly
+		var rotation_step := minf(angle, 12.0 * delta)
+		_cam_pivot.global_transform.basis = _cam_pivot.global_transform.basis.rotated(axis, rotation_step).orthonormalized()
+
 	if not is_multiplayer_authority():
 		return
 
@@ -120,8 +174,13 @@ func _process_movement(delta: float) -> void:
 		var target_vel := direction * SPEED
 		var current_horiz := Vector3(velocity.x, 0.0, velocity.z)
 		if current_horiz.length() > SPEED + 0.1:
-			# Smoothly decay high velocities (like pounces) back to walk speed (longer decay)
-			current_horiz = current_horiz.move_toward(target_vel, 15.0 * delta)
+			# Active steering/braking: if input direction opposes current momentum,
+			# increase decay rate so player can steer or brake out of pounce.
+			var decay_rate := 9.0
+			if direction.length_squared() > 0.01 and current_horiz.normalized().dot(direction.normalized()) < 0.2:
+				decay_rate = 24.0
+				
+			current_horiz = current_horiz.move_toward(target_vel, decay_rate * delta)
 			velocity.x = current_horiz.x
 			velocity.z = current_horiz.z
 		else:
@@ -131,6 +190,12 @@ func _process_movement(delta: float) -> void:
 	else:
 		velocity.x = move_toward(velocity.x, 0.0, SPEED)
 		velocity.z = move_toward(velocity.z, 0.0, SPEED)
+		
+		# If standing still, face the visual model in the direction the camera is looking
+		var cam_forward := -_cam_pivot.global_transform.basis.z.normalized()
+		cam_forward.y = 0.0
+		if cam_forward.length_squared() > 0.01:
+			_face_direction(cam_forward.normalized(), delta)
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Smoothly yaw the visual model so the head points where the character walks.
