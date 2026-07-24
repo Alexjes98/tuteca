@@ -24,6 +24,20 @@ const FWD_RAY       := 0.95   # Forward-probe length (wall detection)
 const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from tuteca.tscn
 const STICK_COOLDOWN := 0.18  # Seconds after a jump before we may re-stick
 
+# ── Stamina (shared by sprint + ceiling-hang) ─────────────────────────────────
+const STAMINA_MAX      := 10.0   # Full stamina pool
+const CLIMB_DRAIN      := 1.0    # Stamina/sec while clinging to a wall
+const CEILING_MULT     := 2.0    # Upside-down drains this × the wall rate
+const SPRINT_DRAIN     := 1.5    # Stamina/sec drained while sprinting
+const STAMINA_RECHARGE := 1.0    # Stamina/sec refilled when neither draining
+const SPRINT_MULT      := 1.8    # Speed multiplier while sprinting
+const CEILING_LOCKOUT  := 1.2    # Seconds it can't re-stick to a wall/ceiling after dropping
+const WALL_DOT         := 0.5    # surface_normal.y below this = wall or ceiling (not floor)
+const CEILING_DOT      := -0.35  # surface_normal.y below this counts as "upside-down"
+const BAR_OFFSET       := 0.6    # Meters above the body to float the stamina bar
+const BAR_WIDTH        := 0.5
+const BAR_HEIGHT       := 0.08
+
 # ── Surface-walking state ─────────────────────────────────────────────────────
 ## Normal of the surface we're glued to; this is our local "up". Starts as world up.
 var _surface_normal: Vector3 = Vector3.UP
@@ -34,16 +48,36 @@ var _face_dir: Vector3 = Vector3.FORWARD
 ## Counts down after a jump so we don't instantly re-stick to what we left.
 var _stick_cd: float = 0.0
 
+# ── Stamina state ─────────────────────────────────────────────────────────────
+## Shared stamina pool: drains while sprinting or hanging, refills otherwise.
+var _stamina: float = STAMINA_MAX
+## Blocks re-sticking to a ceiling right after stamina forced a drop.
+var _ceiling_lock: float = 0.0
+## true while pinned to a wall or ceiling (not the floor); costs stamina.
+var _on_climb: bool = false
+## true while pinned upside-down (ceiling); drains stamina at CEILING_MULT.
+var _upside: bool = false
+## true while sprinting (Shift held, moving, stamina left).
+var _sprinting: bool = false
+## World-space stamina bar floated above the body (built in _ready).
+var _bar_root: Node3D
+var _bar_fill: MeshInstance3D
+
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	super()
 	add_to_group("lizards")
+	_build_ceiling_bar()
 
 func _get_camera_up() -> Vector3:
 	return _surface_normal if _stuck else Vector3.UP
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _process_movement(delta: float) -> void:
+	# Sprint: Shift, only while grounded on a surface, moving, and with stamina.
+	_sprinting = _stuck and _stamina > 0.0 \
+			and Input.is_physical_key_pressed(KEY_SHIFT) \
+			and _input_vector() != Vector2.ZERO
 	if _stuck:
 		_walk_surface(delta)
 	else:
@@ -98,13 +132,24 @@ func _walk_surface(delta: float) -> void:
 	_surface_normal = _surface_normal.slerp(target_normal, minf(1.0, SURFACE_LERP * delta)).normalized()
 	up_direction = _surface_normal
 
+	# Stamina: clinging to walls/ceilings and/or sprinting drain it. On a wall or
+	# ceiling, running dry forces a drop (the floor never costs stamina).
+	_on_climb = _surface_normal.y < WALL_DOT
+	_upside = _surface_normal.y < CEILING_DOT
+	_update_stamina(delta)
+	if _on_climb and _stamina <= 0.0:
+		_detach()
+		_ceiling_lock = CEILING_LOCKOUT   # can't grab a wall/ceiling again yet
+		return
+
+	var speed := SPEED * (SPRINT_MULT if _sprinting else 1.0)
 	var vel := Vector3.ZERO
 	if moving:
 		var md := _project(facing, _surface_normal)
 		if md.length() > 0.01:
 			md = md.normalized()
 			_face_dir = md
-			vel = md * SPEED
+			vel = md * speed
 	else:
 		# If standing still, face the camera's projected look direction on the surface
 		var cam_forward := -camera.global_transform.basis.z
@@ -133,8 +178,13 @@ func _detach() -> void:
 ## Airborne: world gravity plus light air control.
 func _air(delta: float) -> void:
 	up_direction = Vector3.UP
+	_on_climb = false
+	_upside = false
+	_update_stamina(delta)   # airborne: neither clinging nor sprinting → recharges
 	if _stick_cd > 0.0:
 		_stick_cd = maxf(_stick_cd - delta, 0.0)
+	if _ceiling_lock > 0.0:
+		_ceiling_lock = maxf(_ceiling_lock - delta, 0.0)
 	velocity += get_gravity() * delta
 
 	var raw := _input_vector()
@@ -153,6 +203,9 @@ func _post_physics() -> void:
 		return
 	for i in range(get_slide_collision_count()):
 		var n := get_slide_collision(i).get_normal()
+		# While the lockout is active, refuse to grab any wall/ceiling again.
+		if n.y < WALL_DOT and _ceiling_lock > 0.0:
+			continue
 		# Only stick when moving into the surface (not scraping away from it).
 		if velocity.dot(n) < 0.5:
 			_surface_normal = n
@@ -208,3 +261,67 @@ func _ray(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, len: fl
 	q.exclude = [get_rid()]
 	q.collision_mask = collision_mask
 	return space.intersect_ray(q)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ceiling-timer bar (world-space, floats above the body)
+# ─────────────────────────────────────────────────────────────────────────────
+func _build_ceiling_bar() -> void:
+	_bar_root = Node3D.new()
+	add_child(_bar_root)
+	_bar_root.add_child(_make_bar_quad(Color(0.0, 0.0, 0.0, 0.7)))   # background
+	_bar_fill = _make_bar_quad(Color(0.95, 0.35, 0.15))              # depleting fill
+	_bar_fill.position.z = 0.002   # sit just in front of the background
+	_bar_root.add_child(_bar_fill)
+	_bar_root.visible = false
+
+func _make_bar_quad(col: Color) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(BAR_WIDTH, BAR_HEIGHT)
+	mi.mesh = q
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = col
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED   # visible from both sides
+	mat.no_depth_test = true                       # draw over walls
+	mi.material_override = mat
+	return mi
+
+# Position, aim-at-camera, and fill the bar. Visuals only → runs in _process.
+func _process(_dt: float) -> void:
+	if _bar_root == null:
+		return
+	# The stamina bar is always shown for the controlling player.
+	var show := is_multiplayer_authority()
+	_bar_root.visible = show
+	if not show:
+		return
+	_bar_root.global_position = global_position + Vector3.UP * BAR_OFFSET
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		# Billboard the whole bar so its local X stays horizontal on screen.
+		var dir := (cam.global_position - _bar_root.global_position).normalized()
+		var up_ref := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
+		_bar_root.look_at(cam.global_position, up_ref)
+	# Deplete right-to-left, keeping the left edge anchored.
+	var frac := clampf(_stamina / STAMINA_MAX, 0.0, 1.0)
+	_bar_fill.scale.x = maxf(frac, 0.0001)
+	_bar_fill.position.x = -BAR_WIDTH * (1.0 - frac) * 0.5
+	# Green when full, red when low.
+	var mat := _bar_fill.material_override as StandardMaterial3D
+	if mat:
+		mat.albedo_color = Color(0.9, 0.2, 0.15).lerp(Color(0.3, 0.85, 0.3), frac)
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Drain stamina while clinging to walls/ceilings and/or sprinting; recharge otherwise.
+func _update_stamina(delta: float) -> void:
+	var drain := 0.0
+	if _on_climb:
+		drain += CLIMB_DRAIN * (CEILING_MULT if _upside else 1.0)
+	if _sprinting:
+		drain += SPRINT_DRAIN
+	if drain > 0.0:
+		_stamina = maxf(_stamina - drain * delta, 0.0)
+	else:
+		_stamina = minf(_stamina + STAMINA_RECHARGE * delta, STAMINA_MAX)
