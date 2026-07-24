@@ -84,6 +84,9 @@ func _process_special(delta: float) -> void:
 		if camera.fov - _default_fov < 0.1:
 			camera.fov = _default_fov
 
+	if _is_typing():
+		return
+
 	# Programmatic Shift-key fallback to bypass any InputMap binding issues
 	var shift_just_pressed := false
 	var shift_held := Input.is_physical_key_pressed(KEY_SHIFT)

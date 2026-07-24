@@ -3,6 +3,8 @@ DO NOT DELETE THE FIXES IN THE LIST, CROSS OUT THE FIXES IN THE LIST WHEN FIXED.
     - ~~Other players don't see player camera orientation~~
     - ~~Cat is too small~~
     - ~~Cat is too slow~~
-    - Tuteca needs traction reduction on wall climbing
     - ~~Tuteca can't climb horizontal surfaces~~
     - ~~Cat can't walk over bed low side~~
+    - Tuteca needs traction reduction on wall climbing
+    - Tuteca can't climb over small obstacles (small boxes)
+    - Tuteca can't climb the table (climb -> upside_down -> climb)

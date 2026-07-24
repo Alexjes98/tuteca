@@ -28,6 +28,7 @@ const MAX_PEERS  := 8
 @onready var lizards_label: Label = $CanvasLayer/HUD/MarginContainer/HBoxContainer/LizardsLabel
 @onready var game_over_panel: ColorRect = $CanvasLayer/GameOverPanel
 @onready var win_label: Label = $CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer/WinLabel
+@onready var chat_ui: Control = $CanvasLayer/HUD/ChatUI
 
 ## Replicated game variables (replicated via MultiplayerSynchronizer)
 var time_left: float = 180.0
@@ -82,6 +83,9 @@ func _ready() -> void:
 	gekko_btn.pressed.connect(_on_gekko_selected)
 	cat_btn.pressed.connect(_on_cat_selected)
 	_update_character_ui()   # highlight default selection
+
+	if chat_ui:
+		chat_ui.message_sent.connect(_on_chat_message_sent)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Character selection
@@ -334,3 +338,43 @@ func _restart_game() -> void:
 			
 	total_lizards = lizards_count
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Team Chat RPCs & Routing
+# ─────────────────────────────────────────────────────────────────────────────
+func _on_chat_message_sent(message_text: String) -> void:
+	if multiplayer.is_server():
+		_process_and_route_chat_message(1, message_text)
+	else:
+		rpc_send_chat_message.rpc_id(1, message_text)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_send_chat_message(message: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var sender_id := multiplayer.get_remote_sender_id()
+	if sender_id == 0:
+		sender_id = multiplayer.get_unique_id()
+	_process_and_route_chat_message(sender_id, message)
+
+func _process_and_route_chat_message(sender_id: int, message: String) -> void:
+	var sender_team: String = _peer_characters.get(sender_id, "gekko")
+	var filtered := ChatFilter.filter_text(message)
+	if filtered.strip_edges().is_empty():
+		return
+		
+	# Route only to team members of sender_team
+	for peer_id in multiplayer.get_peers():
+		if _peer_characters.get(peer_id, "") == sender_team:
+			rpc_receive_chat_message.rpc_id(peer_id, sender_id, sender_team, filtered)
+			
+	if _peer_characters.get(1, "") == sender_team:
+		if multiplayer.is_server():
+			if chat_ui:
+				chat_ui.add_chat_message(sender_id, sender_team, filtered)
+		else:
+			rpc_receive_chat_message.rpc_id(1, sender_id, sender_team, filtered)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_receive_chat_message(sender_id: int, team_name: String, filtered_text: String) -> void:
+	if chat_ui:
+		chat_ui.add_chat_message(sender_id, team_name, filtered_text)

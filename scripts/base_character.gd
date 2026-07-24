@@ -136,6 +136,19 @@ func _physics_process(delta: float) -> void:
 	if not is_multiplayer_authority():
 		return
 
+	# If player is typing in chat, freeze horizontal movement and skip processing controls
+	if _is_typing():
+		var is_stuck_gekko: bool = false
+		var stuck_val = get("_stuck")
+		if stuck_val != null:
+			is_stuck_gekko = bool(stuck_val)
+		if not is_stuck_gekko and not is_on_floor():
+			velocity += get_gravity() * delta
+		velocity.x = move_toward(velocity.x, 0.0, SPEED * 4.0 * delta)
+		velocity.z = move_toward(velocity.z, 0.0, SPEED * 4.0 * delta)
+		move_and_slide()
+		return
+
 	# Mouse capture toggle
 	if Input.is_action_just_pressed("ui_cancel"):
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -148,6 +161,10 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	_post_physics()
 
+func _is_typing() -> bool:
+	var focus := get_viewport().gui_get_focus_owner()
+	return focus != null and focus is LineEdit
+
 # ─────────────────────────────────────────────────────────────────────────────
 ## Shared gravity + floor-jump + WASD locomotion.
 ## Gekko overrides this to inject wall-climb detection before calling super().
@@ -157,17 +174,18 @@ func _process_movement(delta: float) -> void:
 		velocity += get_gravity() * delta
 
 	# Jump — only from floor; mid-air space is reserved per-character
-	if Input.is_action_pressed("jump") and is_on_floor():
+	if not _is_typing() and Input.is_action_pressed("jump") and is_on_floor():
 		velocity.y = JUMP_VELOCITY
 
 	# WASD → camera-relative direction: W walks away from the camera, so
 	# steering the camera while holding W curves the character's path.
 	var raw := Vector2.ZERO
-	if Input.is_action_pressed("move_forward"): raw.y -= 1.0
-	if Input.is_action_pressed("move_back"):    raw.y += 1.0
-	if Input.is_action_pressed("move_left"):    raw.x -= 1.0
-	if Input.is_action_pressed("move_right"):   raw.x += 1.0
-	raw = raw.normalized()
+	if not _is_typing():
+		if Input.is_action_pressed("move_forward"): raw.y -= 1.0
+		if Input.is_action_pressed("move_back"):    raw.y += 1.0
+		if Input.is_action_pressed("move_left"):    raw.x -= 1.0
+		if Input.is_action_pressed("move_right"):   raw.x += 1.0
+		raw = raw.normalized()
 
 	var direction := Vector3(raw.x, 0.0, raw.y).rotated(Vector3.UP, _cam_pivot.rotation.y)
 	if direction.length_squared() > 0.0:
