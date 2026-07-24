@@ -59,6 +59,7 @@ func spawn_crickets_for_scene() -> void:
 				continue
 				
 			var cricket := CRICKET_SCENE.instantiate() as Node3D
+			cricket.name = "Cricket_" + str(placed)
 			add_child(cricket)
 			
 			if cricket.has_method("place_on_surface"):

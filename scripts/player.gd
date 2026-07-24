@@ -20,7 +20,7 @@ const SURFACE_LERP  := 12.0   # How fast the surface normal rotates on transitio
 const MODEL_LERP    := 14.0   # How fast the model re-aligns to the surface
 const HOVER         := 0.24   # Capsule-center height above the surface
 const GROUND_RAY    := 0.55   # Down-probe length (along -surface_normal)
-const FWD_RAY       := 0.45   # Forward-probe length (wall detection)
+const FWD_RAY       := 0.95   # Forward-probe length (wall detection)
 const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from tuteca.tscn
 const STICK_COOLDOWN := 0.18  # Seconds after a jump before we may re-stick
 
@@ -33,6 +33,14 @@ var _stuck: bool = true
 var _face_dir: Vector3 = Vector3.FORWARD
 ## Counts down after a jump so we don't instantly re-stick to what we left.
 var _stick_cd: float = 0.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+func _ready() -> void:
+	super()
+	add_to_group("lizards")
+
+func _get_camera_up() -> Vector3:
+	return _surface_normal if _stuck else Vector3.UP
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _process_movement(delta: float) -> void:
@@ -97,6 +105,13 @@ func _walk_surface(delta: float) -> void:
 			md = md.normalized()
 			_face_dir = md
 			vel = md * SPEED
+	else:
+		# If standing still, face the camera's projected look direction on the surface
+		var cam_forward := -camera.global_transform.basis.z
+		var md := _project(cam_forward, _surface_normal)
+		if md.length() > 0.01:
+			_face_dir = md.normalized()
+			
 	vel += -_surface_normal * STICK_FORCE   # keep contact
 	velocity = vel
 
