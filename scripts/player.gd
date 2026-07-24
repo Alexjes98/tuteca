@@ -184,6 +184,8 @@ func _orient_model(delta: float) -> void:
 # ─────────────────────────────────────────────────────────────────────────────
 func _input_vector() -> Vector2:
 	var raw := Vector2.ZERO
+	if _is_typing():
+		return raw
 	if Input.is_action_pressed("move_forward"): raw.y -= 1.0
 	if Input.is_action_pressed("move_back"):    raw.y += 1.0
 	if Input.is_action_pressed("move_left"):    raw.x -= 1.0

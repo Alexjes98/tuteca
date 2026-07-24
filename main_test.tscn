@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://cp41xxxu2lcs4" path="res://main_test.gd" id="2_script"]
 [ext_resource type="Script" uid="uid://dwaa4atynhyhe" path="res://scripts/map_generator.gd" id="3_script"]
 [ext_resource type="Script" uid="uid://d1qnt50hg5td8" path="res://scripts/cricket_spawner.gd" id="4_cricket_script"]
+[ext_resource type="PackedScene" uid="uid://cchatui001xyp" path="res://game_objects/chat_ui.tscn" id="5_chat_ui"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_34120"]
 
@@ -198,6 +199,8 @@ text = "Crickets: 0/0"
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Lizards: 0/0"
+
+[node name="ChatUI" parent="CanvasLayer/HUD" instance=ExtResource("5_chat_ui")]
 
 [node name="GameOverPanel" type="ColorRect" parent="CanvasLayer" unique_id=988670117]
 visible = false
