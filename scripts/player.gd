@@ -15,7 +15,7 @@ extends "res://scripts/base_character.gd"
 ## Fully overrides BaseCharacter._process_movement (never calls super) because
 ## gravity, movement and model orientation all become surface-relative here.
 
-const STICK_FORCE   := 8.0    # Velocity pushed into the surface to keep contact
+const STICK_FORCE   := 20.0   # Velocity pushed into the surface to keep contact
 const SURFACE_LERP  := 12.0   # How fast the surface normal rotates on transitions
 const MODEL_LERP    := 14.0   # How fast the model re-aligns to the surface
 const HOVER         := 0.24   # Capsule-center height above the surface
@@ -25,7 +25,7 @@ const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from tuteca.tscn
 const STICK_COOLDOWN := 0.18  # Seconds after a jump before we may re-stick
 
 # ── Stamina (shared by sprint + ceiling-hang) ─────────────────────────────────
-const STAMINA_MAX      := 10.0   # Full stamina pool
+const STAMINA_MAX      := 15.0   # Full stamina pool
 const CLIMB_DRAIN      := 1.0    # Stamina/sec while clinging to a wall
 const CEILING_MULT     := 2.0    # Upside-down drains this × the wall rate
 const SPRINT_DRAIN     := 1.5    # Stamina/sec drained while sprinting
@@ -70,7 +70,10 @@ func _ready() -> void:
 	_build_ceiling_bar()
 
 func _get_camera_up() -> Vector3:
-	return _surface_normal if _stuck else Vector3.UP
+	return Vector3.UP
+
+func _wants_climb() -> bool:
+	return not _is_typing() and (Input.is_action_pressed("gekko_climb") or Input.is_physical_key_pressed(KEY_CTRL))
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _process_movement(delta: float) -> void:
@@ -89,9 +92,7 @@ func _process_movement(delta: float) -> void:
 func _walk_surface(delta: float) -> void:
 	var space := get_world_3d().direct_space_state
 
-	# Camera-relative input projected onto the current surface plane. Using the
-	# camera's full basis (not just yaw) means looking up a wall and pressing W
-	# drives the gecko up it — free movement across the surface, not just sideways.
+	# Camera-relative input projected onto the current surface plane.
 	var raw := _input_vector()
 	var move_dir := _camera_move(raw, _surface_normal)
 	var moving := move_dir.length() > 0.01
@@ -101,9 +102,9 @@ func _walk_surface(delta: float) -> void:
 
 	var target_normal := _surface_normal
 
-	# 1. Wall ahead → wrap onto it (climb). Only counts as a new surface if its
-	#    normal differs enough from our current up.
-	if moving:
+	# 1. Wall ahead → wrap onto it (climb). Only allowed if Ctrl (_wants_climb) is held
+	#    and normal differs enough from current up.
+	if moving and _wants_climb():
 		var f_hit := _ray(space, global_position, facing, FWD_RAY)
 		if not f_hit.is_empty() and f_hit.normal.dot(_surface_normal) < 0.7:
 			target_normal = f_hit.normal
@@ -115,18 +116,44 @@ func _walk_surface(delta: float) -> void:
 			target_normal = g_hit.normal
 			# Ease toward the hover height so we hug the surface without snapping.
 			var goal: Vector3 = g_hit.position + _surface_normal * HOVER
-			global_position = global_position.lerp(goal, 0.3)
+			global_position = global_position.lerp(goal, 0.4)
 		else:
-			# Ground fell away: probe just ahead-and-down to wrap an outer edge.
-			var probe := global_position + facing * 0.3
-			var e_hit := _ray(space, probe, -_surface_normal, GROUND_RAY + 0.4)
+			# Ground fell away: probe ahead-and-down or around edges to wrap outer corner.
+			var probe := global_position + facing * 0.35
+			var e_hit := _ray(space, probe, -_surface_normal, GROUND_RAY + 0.5)
 			if not e_hit.is_empty():
 				target_normal = e_hit.normal
+			elif _wants_climb():
+				# Try probing back towards our previous surface or curved edge
+				var back_probe := global_position + facing * 0.35 - _surface_normal * 0.35
+				var b_hit := _ray(space, back_probe, -facing, FWD_RAY + 0.4)
+				if not b_hit.is_empty():
+					target_normal = b_hit.normal
+				else:
+					# Fallback outer probe in facing direction turned inward
+					var in_hit := _ray(space, probe, -facing, FWD_RAY + 0.4)
+					if not in_hit.is_empty():
+						target_normal = in_hit.normal
+					else:
+						_stuck = false
+						velocity += get_gravity() * delta
+						return
 			else:
-				# Nothing to stand on — we walked off into open air.
+				# Nothing to stand on and not climbing — walk off into open air.
 				_stuck = false
 				velocity += get_gravity() * delta
 				return
+
+	# If target normal is a wall/ceiling (non-floor) but player is not holding Ctrl,
+	# don't climb onto it!
+	if target_normal.y < WALL_DOT and not _wants_climb():
+		if _surface_normal.y < WALL_DOT:
+			# Currently on a wall/ceiling and released Ctrl -> detach!
+			_detach()
+			return
+		else:
+			# Standing on floor, target surface is a wall, but no Ctrl -> keep current floor normal
+			target_normal = _surface_normal
 
 	# Rotate our up toward the detected surface, then rebuild movement on it.
 	_surface_normal = _surface_normal.slerp(target_normal, minf(1.0, SURFACE_LERP * delta)).normalized()
@@ -136,6 +163,12 @@ func _walk_surface(delta: float) -> void:
 	# ceiling, running dry forces a drop (the floor never costs stamina).
 	_on_climb = _surface_normal.y < WALL_DOT
 	_upside = _surface_normal.y < CEILING_DOT
+
+	# Re-check: if we are on a climb surface and not holding Ctrl, detach.
+	if _on_climb and not _wants_climb():
+		_detach()
+		return
+
 	_update_stamina(delta)
 	if _on_climb and _stamina <= 0.0:
 		_detach()
@@ -203,9 +236,10 @@ func _post_physics() -> void:
 		return
 	for i in range(get_slide_collision_count()):
 		var n := get_slide_collision(i).get_normal()
-		# While the lockout is active, refuse to grab any wall/ceiling again.
-		if n.y < WALL_DOT and _ceiling_lock > 0.0:
-			continue
+		# If it's a wall or ceiling, only stick if holding Ctrl (_wants_climb)
+		if n.y < WALL_DOT:
+			if not _wants_climb() or _ceiling_lock > 0.0:
+				continue
 		# Only stick when moving into the surface (not scraping away from it).
 		if velocity.dot(n) < 0.5:
 			_surface_normal = n

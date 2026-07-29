@@ -4,7 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://cfrgg8kaub5v1" path="res://assets/3D/tuteca.glb" id="2_iqdrr"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_0hqrf"]
-radius = 0.3166573
+radius = 0.24324158
 
 [node name="CharacterBody3D" type="CharacterBody3D" unique_id=678382498]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, 5.7945185)
@@ -17,7 +17,7 @@ transform = Transform3D(0.85, 0, 0, 0, 0.85, 0, 0, 0, 0.85, 0, 0, 0)
 transform = Transform3D(2.1926515, -0.49824455, 0.31133774, 0, 1.2029167, 1.9250691, -0.5875192, -1.859474, 1.1619283, 0, 0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=2066179414]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0097754, -0.1108489)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0050272346, -0.0027365685)
 shape = SubResource("SphereShape3D_0hqrf")
 
 [node name="CameraPivot" type="Node3D" parent="." unique_id=454858915]

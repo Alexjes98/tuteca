@@ -1,0 +1,240 @@
+[gd_scene format=3 uid="uid://ddnvcfccasiaw"]
+
+[ext_resource type="Script" uid="uid://cp41xxxu2lcs4" path="res://main_test.gd" id="2_script"]
+[ext_resource type="Script" uid="uid://dwaa4atynhyhe" path="res://scripts/map_generator.gd" id="3_script"]
+[ext_resource type="Script" uid="uid://d1qnt50hg5td8" path="res://scripts/cricket_spawner.gd" id="4_cricket_script"]
+[ext_resource type="PackedScene" uid="uid://cchatui001xyp" path="res://game_objects/chat_ui.tscn" id="5_chat_ui"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_34120"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ce0kv"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_rywbs"]
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_floor"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_34120"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall"]
+
+[node name="Node3D" type="Node3D" unique_id=449169380]
+script = ExtResource("2_script")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1310389914]
+transform = Transform3D(0.25881907, -0.2984875, 0.9186501, 0, 0.95105654, 0.30901703, -0.9659258, -0.0799795, 0.24615158, 2.3922, 1.7594593, 6.247422)
+
+[node name="Map" type="Node3D" parent="." unique_id=1897555832]
+script = ExtResource("3_script")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Map" unique_id=1389413648]
+transform = Transform3D(8.81, 0, 0, 0, 8.81, 0, 0, 0, 8.81, -0.030049324, 0.012003899, 0.0066108704)
+material_override = SubResource("StandardMaterial3D_34120")
+material_overlay = SubResource("StandardMaterial3D_ce0kv")
+mesh = SubResource("PlaneMesh_rywbs")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D" unique_id=1767948641]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/StaticBody3D" unique_id=2064287699]
+shape = SubResource("WorldBoundaryShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Map/MeshInstance3D" unique_id=1344453329]
+transform = Transform3D(0.049999997, 0, 0, 0, 0.23, 0, 0, 0, 1.9499999, -0.95123065, 0.049696926, 0)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D" unique_id=185008278]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D/StaticBody3D" unique_id=1551953333]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="Map/MeshInstance3D" unique_id=1444890267]
+transform = Transform3D(-4.240005e-09, 0, 1.969, 0, 0.178, 0, -0.097, 0, -8.606772e-08, 0.044579398, 0.06267167, -0.9426297)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D3" unique_id=1405691616]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D3/StaticBody3D" unique_id=1448450159]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D4" type="MeshInstance3D" parent="Map/MeshInstance3D" unique_id=1757550525]
+transform = Transform3D(-4.240005e-09, 0, 1.999, 0, 0.178, 0, -0.097, 0, -8.7379064e-08, 0.010268992, 0.06267167, 1.0037131)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D4" unique_id=1045336061]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D4/StaticBody3D" unique_id=1722753520]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="Map/MeshInstance3D" unique_id=44418130]
+transform = Transform3D(0.069, 0, 0, 0, 0.202, 0, 0, 0, 1.9279997, 0.99373204, 0.049419988, 0.05747722)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D2" unique_id=514530099]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D2/StaticBody3D" unique_id=1916691643]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D5" type="MeshInstance3D" parent="Map/MeshInstance3D" unique_id=604503707]
+transform = Transform3D(0.371151, 0, 0, 0, 0.50136405, 0, 0, 0, 0.18894395, 0.26726434, 0.24543087, -0.18848032)
+mesh = SubResource("BoxMesh_34120")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Map/MeshInstance3D/MeshInstance3D5" unique_id=22498641]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map/MeshInstance3D/MeshInstance3D5/StaticBody3D" unique_id=1450680290]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=236732287]
+transform = Transform3D(-0.83876866, 0.29304576, -0.45890224, 0.06215347, 0.8888361, 0.45399052, 0.54092884, 0.35227066, -0.7637417, 0, 2.8911173, 0)
+
+[node name="Players" type="Node3D" parent="." unique_id=261815054]
+
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="." unique_id=538142575]
+
+[node name="CricketSpawner" type="Node3D" parent="." unique_id=987654321]
+script = ExtResource("4_cricket_script")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=665664592]
+
+[node name="LobbyUI" type="Control" parent="CanvasLayer" unique_id=1142090906]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="CanvasLayer/LobbyUI" unique_id=835120763]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = -100.0
+offset_right = 140.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/LobbyUI/PanelContainer" unique_id=301786346]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=1730081101]
+layout_mode = 2
+text = "TUTECA MULTIPLAYER"
+horizontal_alignment = 1
+
+[node name="Separator" type="HSeparator" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=1922298419]
+layout_mode = 2
+
+[node name="CharacterLabel" type="Label" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=1555974432]
+layout_mode = 2
+text = "Choose your character:"
+horizontal_alignment = 1
+
+[node name="CharacterRow" type="HBoxContainer" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=259242125]
+layout_mode = 2
+alignment = 1
+
+[node name="GekkoButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/CharacterRow" unique_id=1920516154]
+layout_mode = 2
+text = "🦎 Gekko"
+
+[node name="CatButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/CharacterRow" unique_id=650829227]
+layout_mode = 2
+text = "🐱 Cat"
+
+[node name="IPInput" type="LineEdit" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=649601895]
+layout_mode = 2
+text = "127.0.0.1"
+placeholder_text = "IP Address"
+alignment = 1
+
+[node name="HostButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=722446196]
+layout_mode = 2
+text = "Host"
+
+[node name="JoinButton" type="Button" parent="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer" unique_id=2004493389]
+layout_mode = 2
+text = "Join"
+
+[node name="HUD" type="Control" parent="CanvasLayer" unique_id=988670111]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="CanvasLayer/HUD" unique_id=988670112]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 50.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/HUD/MarginContainer" unique_id=988670113]
+layout_mode = 2
+theme_override_constants/separation = 40
+alignment = 1
+
+[node name="TimerLabel" type="Label" parent="CanvasLayer/HUD/MarginContainer/HBoxContainer" unique_id=988670114]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Time: 2:00"
+
+[node name="CricketsLabel" type="Label" parent="CanvasLayer/HUD/MarginContainer/HBoxContainer" unique_id=988670115]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Crickets: 0/0"
+
+[node name="LizardsLabel" type="Label" parent="CanvasLayer/HUD/MarginContainer/HBoxContainer" unique_id=988670116]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Lizards: 0/0"
+
+[node name="ChatUI" parent="CanvasLayer/HUD" unique_id=1449276504 instance=ExtResource("5_chat_ui")]
+layout_mode = 1
+
+[node name="GameOverPanel" type="ColorRect" parent="CanvasLayer" unique_id=988670117]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.784314)
+
+[node name="CenterContainer" type="CenterContainer" parent="CanvasLayer/GameOverPanel" unique_id=988670118]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/GameOverPanel/CenterContainer" unique_id=988670119]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="WinLabel" type="Label" parent="CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer" unique_id=988670120]
+layout_mode = 2
+theme_override_font_sizes/font_size = 48
+text = "Cats Win!"
+horizontal_alignment = 1
+
+[node name="RestartLabel" type="Label" parent="CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer" unique_id=988670121]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Restarting in 5 seconds..."
+horizontal_alignment = 1
+
+[connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/HostButton" to="." method="_on_host_pressed"]
+[connection signal="pressed" from="CanvasLayer/LobbyUI/PanelContainer/VBoxContainer/JoinButton" to="." method="_on_join_pressed"]
