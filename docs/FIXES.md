@@ -5,6 +5,6 @@ DO NOT DELETE THE FIXES IN THE LIST, CROSS OUT THE FIXES IN THE LIST WHEN FIXED.
     - ~~Cat is too slow~~
     - ~~Tuteca can't climb horizontal surfaces~~
     - ~~Cat can't walk over bed low side~~
-    - Tuteca needs traction reduction on wall climbing
+    - ~~Tuteca needs traction reduction on wall climbing~~
+    - ~~Tuteca can't climb the table (climb -> upside_down -> climb)~~
     - Tuteca can't climb over small obstacles (small boxes)
-    - Tuteca can't climb the table (climb -> upside_down -> climb)
