@@ -87,6 +87,12 @@ func _ready() -> void:
 	if chat_ui:
 		chat_ui.message_sent.connect(_on_chat_message_sent)
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_M and event.ctrl_pressed:
+		var master_bus := AudioServer.get_bus_index("Master")
+		AudioServer.set_bus_mute(master_bus, not AudioServer.is_bus_mute(master_bus))
+		print("[Audio Settings] Mute toggled. Current state: ", AudioServer.is_bus_mute(master_bus))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Character selection
 # ─────────────────────────────────────────────────────────────────────────────
