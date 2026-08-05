@@ -52,6 +52,7 @@ func _ready() -> void:
 	
 	# Instantiate and configure MultiplayerSynchronizer
 	var synchronizer := MultiplayerSynchronizer.new()
+	synchronizer.name = "MultiplayerSynchronizer"
 	var config := SceneReplicationConfig.new()
 	config.add_property(".:position")
 	config.add_property(".:rotation")

@@ -60,14 +60,53 @@ var _upside: bool = false
 ## true while sprinting (Shift held, moving, stamina left).
 var _sprinting: bool = false
 ## World-space stamina bar floated above the body (built in _ready).
-var _bar_root: Node3D
-var _bar_fill: MeshInstance3D
+# ── HUD / UI State ────────────────────────────────────────────────────────────
+var _hud: CanvasLayer
+var _stamina_fill: ColorRect
+var _camo_container: Control
+var _camo_fill: ColorRect
+
+# ── Camouflage state ──────────────────────────────────────────────────────────
+const CAMOUFLAGE_DELAY := 3.0
+const CAMOUFLAGE_TRANSPARENCY := 0.9
+const CAMOUFLAGE_FADE_SPEED := 1.0
+
+var camouflage_transparency: float = 0.0
+var _still_time: float = 0.0
+var _meshes: Array[GeometryInstance3D] = []
+
+var _camo_sound_player: AudioStreamPlayer3D
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	super()
 	add_to_group("lizards")
-	_build_ceiling_bar()
+	_build_hud()
+	_find_meshes(_model_root)
+	
+	# Dynamically add camouflage_transparency to MultiplayerSynchronizer so it replicates
+	for child in get_children():
+		if child is MultiplayerSynchronizer:
+			child.replication_config.add_property(".:camouflage_transparency")
+
+	# Setup proximity spatial audio player for camouflage sound
+	_camo_sound_player = AudioStreamPlayer3D.new()
+	var stream := load("res://assets/sounds/u_xg7ssi08yr-gecko-371354.mp3") as AudioStreamMP3
+	if stream:
+		stream.loop = true
+	_camo_sound_player.stream = stream
+	_camo_sound_player.volume_db = -12.0  # Reduced base volume
+	_camo_sound_player.unit_size = 4.5    # Slower drop-off
+	_camo_sound_player.max_distance = 24.0 # Silent beyond 24 meters
+	_camo_sound_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+	add_child(_camo_sound_player)
+
+func _find_meshes(node: Node) -> void:
+	if node is GeometryInstance3D:
+		_meshes.append(node)
+	for child in node.get_children():
+		_find_meshes(child)
+
 
 func _get_camera_up() -> Vector3:
 	return Vector3.UP
@@ -299,55 +338,126 @@ func _ray(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, len: fl
 	return space.intersect_ray(q)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ceiling-timer bar (world-space, floats above the body)
 # ─────────────────────────────────────────────────────────────────────────────
-func _build_ceiling_bar() -> void:
-	_bar_root = Node3D.new()
-	add_child(_bar_root)
-	_bar_root.add_child(_make_bar_quad(Color(0.0, 0.0, 0.0, 0.7)))   # background
-	_bar_fill = _make_bar_quad(Color(0.95, 0.35, 0.15))              # depleting fill
-	_bar_fill.position.z = 0.002   # sit just in front of the background
-	_bar_root.add_child(_bar_fill)
-	_bar_root.visible = false
+# HUD/UI Setup
+# ─────────────────────────────────────────────────────────────────────────────
+func _build_hud() -> void:
+	if not is_multiplayer_authority():
+		return
 
-func _make_bar_quad(col: Color) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var q := QuadMesh.new()
-	q.size = Vector2(BAR_WIDTH, BAR_HEIGHT)
-	mi.mesh = q
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = col
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED   # visible from both sides
-	mat.no_depth_test = true                       # draw over walls
-	mi.material_override = mat
-	return mi
+	_hud = CanvasLayer.new()
+	add_child(_hud)
+
+	# 1. Stamina Bar Container (width 200, height 16, bottom center)
+	var stamina_container := Control.new()
+	stamina_container.name = "StaminaBar"
+	stamina_container.anchor_left = 0.5
+	stamina_container.anchor_top = 1.0
+	stamina_container.anchor_right = 0.5
+	stamina_container.anchor_bottom = 1.0
+	stamina_container.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	stamina_container.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	stamina_container.offset_left = -100
+	stamina_container.offset_top = -80
+	stamina_container.offset_right = 100
+	stamina_container.offset_bottom = -64
+	_hud.add_child(stamina_container)
+
+	var stamina_bg := ColorRect.new()
+	stamina_bg.color = Color(0.0, 0.0, 0.0, 0.5)
+	stamina_bg.anchor_right = 1.0
+	stamina_bg.anchor_bottom = 1.0
+	stamina_bg.offset_right = 0
+	stamina_bg.offset_bottom = 0
+	stamina_container.add_child(stamina_bg)
+
+	_stamina_fill = ColorRect.new()
+	_stamina_fill.color = Color(0.3, 0.85, 0.3)
+	_stamina_fill.anchor_bottom = 1.0
+	_stamina_fill.offset_bottom = 0
+	stamina_container.add_child(_stamina_fill)
+
+	# 2. Camouflage Bar Container (directly below stamina, height 4)
+	_camo_container = Control.new()
+	_camo_container.name = "CamouflageBar"
+	_camo_container.anchor_left = 0.5
+	_camo_container.anchor_top = 1.0
+	_camo_container.anchor_right = 0.5
+	_camo_container.anchor_bottom = 1.0
+	_camo_container.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_camo_container.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_camo_container.offset_left = -100
+	_camo_container.offset_top = -64
+	_camo_container.offset_right = 100
+	_camo_container.offset_bottom = -60
+	_hud.add_child(_camo_container)
+
+	var camo_bg := ColorRect.new()
+	camo_bg.color = Color(0.0, 0.0, 0.0, 0.5)
+	camo_bg.anchor_right = 1.0
+	camo_bg.anchor_bottom = 1.0
+	camo_bg.offset_right = 0
+	camo_bg.offset_bottom = 0
+	_camo_container.add_child(camo_bg)
+
+	_camo_fill = ColorRect.new()
+	_camo_fill.color = Color(1.0, 1.0, 1.0)
+	_camo_fill.anchor_bottom = 1.0
+	_camo_fill.offset_bottom = 0
+	_camo_container.add_child(_camo_fill)
 
 # Position, aim-at-camera, and fill the bar. Visuals only → runs in _process.
-func _process(_dt: float) -> void:
-	if _bar_root == null:
+func _process(delta: float) -> void:
+	if is_multiplayer_authority():
+		var is_still := _stuck and _input_vector().length() < 0.01 and velocity.slide(_surface_normal).length() < 0.05
+		if is_still:
+			_still_time += delta
+		else:
+			_still_time = 0.0
+		
+		var target_transparency := CAMOUFLAGE_TRANSPARENCY if _still_time >= CAMOUFLAGE_DELAY else 0.0
+		camouflage_transparency = move_toward(camouflage_transparency, target_transparency, CAMOUFLAGE_FADE_SPEED * delta)
+		
+	for mesh in _meshes:
+		if is_multiplayer_authority():
+			mesh.transparency = camouflage_transparency
+			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		else:
+			# For remote clients (like the cat), scale transparency to leave 1% opacity (max 0.99 transparent)
+			var remote_transparency := camouflage_transparency / CAMOUFLAGE_TRANSPARENCY
+			var t := clampf(remote_transparency, 0.0, 0.99)
+			mesh.transparency = t
+			if t > 0.95:
+				mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			else:
+				mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+	# Proximity audio: play if fully/almost fully camouflaged
+	if _camo_sound_player != null:
+		var is_fully_camouflaged := camouflage_transparency >= CAMOUFLAGE_TRANSPARENCY - 0.01
+		if is_fully_camouflaged:
+			if not _camo_sound_player.playing:
+				_camo_sound_player.play()
+		else:
+			if _camo_sound_player.playing:
+				_camo_sound_player.stop()
+
+	if not is_multiplayer_authority() or _hud == null:
 		return
-	# The stamina bar is always shown for the controlling player.
-	var show := is_multiplayer_authority()
-	_bar_root.visible = show
-	if not show:
-		return
-	_bar_root.global_position = global_position + Vector3.UP * BAR_OFFSET
-	var cam := get_viewport().get_camera_3d()
-	if cam:
-		# Billboard the whole bar so its local X stays horizontal on screen.
-		var dir := (cam.global_position - _bar_root.global_position).normalized()
-		var up_ref := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
-		_bar_root.look_at(cam.global_position, up_ref)
-	# Deplete right-to-left, keeping the left edge anchored.
+
+	# Update stamina bar fill & color
 	var frac := clampf(_stamina / STAMINA_MAX, 0.0, 1.0)
-	_bar_fill.scale.x = maxf(frac, 0.0001)
-	_bar_fill.position.x = -BAR_WIDTH * (1.0 - frac) * 0.5
-	# Green when full, red when low.
-	var mat := _bar_fill.material_override as StandardMaterial3D
-	if mat:
-		mat.albedo_color = Color(0.9, 0.2, 0.15).lerp(Color(0.3, 0.85, 0.3), frac)
+	_stamina_fill.anchor_right = frac
+	_stamina_fill.offset_right = 0
+	_stamina_fill.color = Color(0.9, 0.2, 0.15).lerp(Color(0.3, 0.85, 0.3), frac)
+
+	# Update camouflage bar visibility and fill
+	var show_camo := _still_time > 0.0 or camouflage_transparency > 0.0
+	_camo_container.visible = show_camo
+	if show_camo:
+		var camo_frac := clampf(_still_time / CAMOUFLAGE_DELAY, 0.0, 1.0)
+		_camo_fill.anchor_right = camo_frac
+		_camo_fill.offset_right = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Drain stamina while clinging to walls/ceilings and/or sprinting; recharge otherwise.
@@ -361,3 +471,14 @@ func _update_stamina(delta: float) -> void:
 		_stamina = maxf(_stamina - drain * delta, 0.0)
 	else:
 		_stamina = minf(_stamina + STAMINA_RECHARGE * delta, STAMINA_MAX)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RPC overrides
+# ─────────────────────────────────────────────────────────────────────────────
+@rpc("any_peer", "call_local", "reliable")
+func rpc_apply_knockback(force: Vector3) -> void:
+	super(force)
+	if is_multiplayer_authority():
+		# Force out of camouflage immediately on hit
+		_still_time = 0.0
+		camouflage_transparency = 0.0
