@@ -56,8 +56,10 @@ func _calculate_surface_transform(hit_pos: Vector3, normal: Vector3, rng: Random
 		tangent = ref.cross(n)
 	tangent = tangent.normalized()
 	
-	var bitangent := n.cross(tangent).normalized()
-	
+	# tangent × n keeps the basis right-handed (X × Y = Z); n × tangent would
+	# build a reflected (det -1) basis that can't be cast to a Quaternion.
+	var bitangent := tangent.cross(n).normalized()
+
 	# Basis: Y axis = surface normal (perpendicular to surface)
 	var b := Basis(tangent, n, bitangent).orthonormalized()
 	
@@ -98,9 +100,12 @@ func _process(delta: float) -> void:
 			var up_dir := _jump_start_transform.basis.y.lerp(_jump_target_transform.basis.y, _jump_progress).normalized()
 			global_position = lerped_pos + up_dir * arc
 			
-			# Smoothly slerp rotation basis
-			var slerped_basis := _jump_start_transform.basis.orthonormalized().slerp(_jump_target_transform.basis.orthonormalized(), _jump_progress)
-			global_transform.basis = slerped_basis
+			# Smoothly slerp rotation via quaternions. get_rotation_quaternion()
+			# strips scale AND fixes reflected (det -1) bases, so this never
+			# triggers the "must be normalized to be casted" error.
+			var q0 := _jump_start_transform.basis.get_rotation_quaternion()
+			var q1 := _jump_target_transform.basis.get_rotation_quaternion()
+			global_transform.basis = Basis(q0.slerp(q1, _jump_progress))
 
 # Server checks for a valid nearby surface to leap towards
 func _attempt_hop() -> void:
