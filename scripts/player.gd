@@ -123,6 +123,11 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 		if res: return res
 	return null
 
+var _head_bone: int = -1
+@export var head_pitch_offset: float = 0.0
+@export var head_yaw_offset: float = 45.0
+@export var head_roll_offset: float = 0.0
+
 func _setup_skeleton() -> void:
 	_skeleton = _find_skeleton(_model_root)
 	if not _skeleton:
@@ -138,8 +143,12 @@ func _setup_skeleton() -> void:
 		
 		if b_name in ["Spine", "Spine_02", "Spine_03"]:
 			_spine_bones.append(i)
-		elif b_name == "Neck":
+		if b_name == "Neck":
 			_neck_bone = i
+			print("NECK BASIS: ", _skeleton.get_bone_rest(i).basis)
+		elif b_name in ["Bone.004", "Head", "head"]:
+			_head_bone = i
+			print("HEAD BASIS: ", _skeleton.get_bone_rest(i).basis)
 		elif b_name == "Clavicle_L":
 			_front_left_leg = i
 		elif b_name == "Clavicle_R":
@@ -172,10 +181,19 @@ func _animate_skeleton(delta: float, is_moving: bool, is_sprinting: bool) -> voi
 				var rest: Quaternion = _bone_rest_rotations[b_idx]
 				_skeleton.set_bone_pose_rotation(b_idx, rest * spine_rot)
 
-		# Neck counter flex (keeps head pointing forward)
+		var head_rot_offset := Quaternion.from_euler(Vector3(
+			deg_to_rad(head_pitch_offset),
+			deg_to_rad(head_yaw_offset),
+			deg_to_rad(head_roll_offset)
+		))
+
+		# Neck counter flex (keeps head pointing forward) + head alignment offset
 		if _neck_bone >= 0 and _neck_bone in _bone_rest_rotations:
 			var neck_counter := Quaternion(Vector3.UP, -body_shake * (0.10 if is_sprinting else 0.05))
-			_skeleton.set_bone_pose_rotation(_neck_bone, _bone_rest_rotations[_neck_bone] * neck_counter)
+			_skeleton.set_bone_pose_rotation(_neck_bone, head_rot_offset * _bone_rest_rotations[_neck_bone] * neck_counter)
+
+		if _head_bone >= 0 and _head_bone in _bone_rest_rotations:
+			_skeleton.set_bone_pose_rotation(_head_bone, head_rot_offset * _bone_rest_rotations[_head_bone])
 
 		# Tail waving / shaking behind body
 		for t_i in range(_tail_bones.size()):
@@ -207,11 +225,18 @@ func _animate_skeleton(delta: float, is_moving: bool, is_sprinting: bool) -> voi
 			var rot := Quaternion(Vector3.UP, leg_swing2 * swing_amp) * Quaternion(Vector3.RIGHT, maxf(0.0, leg_swing2) * lift_amp)
 			_skeleton.set_bone_pose_rotation(_rear_left_leg, _bone_rest_rotations[_rear_left_leg] * rot)
 	else:
-		# Smoothly reset all bones to rest pose when standing still
+		# Smoothly reset all bones to rest pose when standing still (with head offsets applied)
 		_walk_phase = 0.0
+		var head_rot_offset := Quaternion.from_euler(Vector3(
+			deg_to_rad(head_pitch_offset),
+			deg_to_rad(head_yaw_offset),
+			deg_to_rad(head_roll_offset)
+		))
 		for b_idx in _bone_rest_rotations:
 			var cur_rot := _skeleton.get_bone_pose_rotation(b_idx)
 			var target_rot: Quaternion = _bone_rest_rotations[b_idx]
+			if (b_idx == _neck_bone or b_idx == _head_bone) and b_idx >= 0:
+				target_rot = head_rot_offset * target_rot
 			_skeleton.set_bone_pose_rotation(b_idx, cur_rot.slerp(target_rot, minf(1.0, 14.0 * delta)))
 
 func _find_meshes(node: Node) -> void:
