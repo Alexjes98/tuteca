@@ -135,7 +135,6 @@ func _setup_skeleton() -> void:
 	for i in _skeleton.get_bone_count():
 		var b_name := _skeleton.get_bone_name(i)
 		_bone_rest_rotations[i] = _skeleton.get_bone_rest(i).basis.get_rotation_quaternion()
-		print("BONE REST ", i, " (", b_name, "): pos=", _skeleton.get_bone_rest(i).origin)
 		
 		if b_name in ["Spine", "Spine_02", "Spine_03"]:
 			_spine_bones.append(i)
