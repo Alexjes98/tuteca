@@ -18,7 +18,7 @@ extends "res://scripts/base_character.gd"
 const STICK_FORCE   := 20.0   # Velocity pushed into the surface to keep contact
 const SURFACE_LERP  := 12.0   # How fast the surface normal rotates on transitions
 const MODEL_LERP    := 14.0   # How fast the model re-aligns to the surface
-const HOVER         := 0.24   # Capsule-center height above the surface
+const HOVER         := 0.38   # Capsule-center height above the surface
 const GROUND_RAY    := 0.55   # Down-probe length (along -surface_normal)
 const FWD_RAY       := 0.95   # Forward-probe length (wall detection)
 const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from tuteca.tscn
@@ -78,11 +78,25 @@ var _meshes: Array[GeometryInstance3D] = []
 var _camo_sound_player: AudioStreamPlayer3D
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ── Skeleton procedural animation state ───────────────────────────────────────
+var _skeleton: Skeleton3D
+var _spine_bones: Array[int] = []
+var _tail_bones: Array[int] = []
+var _neck_bone: int = -1
+var _front_left_leg: int = -1
+var _front_right_leg: int = -1
+var _rear_left_leg: int = -1
+var _rear_right_leg: int = -1
+var _bone_rest_rotations: Dictionary = {}
+var _walk_phase: float = 0.0
+
+# ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	super()
 	add_to_group("lizards")
 	_build_hud()
 	_find_meshes(_model_root)
+	_setup_skeleton()
 	
 	# Dynamically add camouflage_transparency to MultiplayerSynchronizer so it replicates
 	for child in get_children():
@@ -101,6 +115,106 @@ func _ready() -> void:
 	_camo_sound_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 	add_child(_camo_sound_player)
 
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node as Skeleton3D
+	for child in node.get_children():
+		var res := _find_skeleton(child)
+		if res: return res
+	return null
+
+func _setup_skeleton() -> void:
+	_skeleton = _find_skeleton(_model_root)
+	if not _skeleton:
+		return
+
+	_spine_bones.clear()
+	_tail_bones.clear()
+	_bone_rest_rotations.clear()
+
+	for i in _skeleton.get_bone_count():
+		var b_name := _skeleton.get_bone_name(i)
+		_bone_rest_rotations[i] = _skeleton.get_bone_rest(i).basis.get_rotation_quaternion()
+		print("BONE REST ", i, " (", b_name, "): pos=", _skeleton.get_bone_rest(i).origin)
+		
+		if b_name in ["Spine", "Spine_02", "Spine_03"]:
+			_spine_bones.append(i)
+		elif b_name == "Neck":
+			_neck_bone = i
+		elif b_name == "Clavicle_L":
+			_front_left_leg = i
+		elif b_name == "Clavicle_R":
+			_front_right_leg = i
+		elif b_name in ["Bone.005", "Leg_L", "Thigh_L"]:
+			_rear_left_leg = i
+		elif b_name in ["Bone.014", "Leg_R", "Thigh_R"]:
+			_rear_right_leg = i
+		elif b_name in ["Bone.017", "Bone.018", "Bone.019", "Bone.020", "Bone.021"]:
+			_tail_bones.append(i)
+
+func _animate_skeleton(delta: float, is_moving: bool, is_sprinting: bool) -> void:
+	if not _skeleton:
+		return
+
+	if is_moving:
+		# Faster gait and shaking when sprinting vs walking
+		var freq := 22.0 if is_sprinting else 12.0
+		_walk_phase += delta * freq
+
+		var body_shake := sin(_walk_phase)
+		var leg_swing1 := sin(_walk_phase)
+		var leg_swing2 := sin(_walk_phase + PI)
+		
+		# Spine undulation (side-to-side body shake)
+		var body_shake_amp := 0.16 if is_sprinting else 0.09
+		var spine_rot := Quaternion(Vector3.UP, body_shake * body_shake_amp)
+		for b_idx in _spine_bones:
+			if b_idx in _bone_rest_rotations:
+				var rest: Quaternion = _bone_rest_rotations[b_idx]
+				_skeleton.set_bone_pose_rotation(b_idx, rest * spine_rot)
+
+		# Neck counter flex (keeps head pointing forward)
+		if _neck_bone >= 0 and _neck_bone in _bone_rest_rotations:
+			var neck_counter := Quaternion(Vector3.UP, -body_shake * (0.10 if is_sprinting else 0.05))
+			_skeleton.set_bone_pose_rotation(_neck_bone, _bone_rest_rotations[_neck_bone] * neck_counter)
+
+		# Tail waving / shaking behind body
+		for t_i in range(_tail_bones.size()):
+			var b_idx: int = _tail_bones[t_i]
+			if b_idx in _bone_rest_rotations:
+				var tail_phase := _walk_phase - (t_i + 1) * 0.4
+				var tail_rot := Quaternion(Vector3.UP, sin(tail_phase) * (0.18 if is_sprinting else 0.10))
+				_skeleton.set_bone_pose_rotation(b_idx, _bone_rest_rotations[b_idx] * tail_rot)
+
+		# Leg paddling / swinging
+		var swing_amp := 0.40 if is_sprinting else 0.24
+		var lift_amp := 0.20 if is_sprinting else 0.12
+
+		# Leg Pair 1: Front Left & Rear Right
+		if _front_left_leg >= 0 and _front_left_leg in _bone_rest_rotations:
+			var rot := Quaternion(Vector3.UP, leg_swing1 * swing_amp) * Quaternion(Vector3.RIGHT, maxf(0.0, leg_swing1) * lift_amp)
+			_skeleton.set_bone_pose_rotation(_front_left_leg, _bone_rest_rotations[_front_left_leg] * rot)
+
+		if _rear_right_leg >= 0 and _rear_right_leg in _bone_rest_rotations:
+			var rot := Quaternion(Vector3.UP, leg_swing1 * swing_amp) * Quaternion(Vector3.RIGHT, maxf(0.0, leg_swing1) * lift_amp)
+			_skeleton.set_bone_pose_rotation(_rear_right_leg, _bone_rest_rotations[_rear_right_leg] * rot)
+
+		# Leg Pair 2: Front Right & Rear Left
+		if _front_right_leg >= 0 and _front_right_leg in _bone_rest_rotations:
+			var rot := Quaternion(Vector3.UP, leg_swing2 * swing_amp) * Quaternion(Vector3.RIGHT, maxf(0.0, leg_swing2) * lift_amp)
+			_skeleton.set_bone_pose_rotation(_front_right_leg, _bone_rest_rotations[_front_right_leg] * rot)
+
+		if _rear_left_leg >= 0 and _rear_left_leg in _bone_rest_rotations:
+			var rot := Quaternion(Vector3.UP, leg_swing2 * swing_amp) * Quaternion(Vector3.RIGHT, maxf(0.0, leg_swing2) * lift_amp)
+			_skeleton.set_bone_pose_rotation(_rear_left_leg, _bone_rest_rotations[_rear_left_leg] * rot)
+	else:
+		# Smoothly reset all bones to rest pose when standing still
+		_walk_phase = 0.0
+		for b_idx in _bone_rest_rotations:
+			var cur_rot := _skeleton.get_bone_pose_rotation(b_idx)
+			var target_rot: Quaternion = _bone_rest_rotations[b_idx]
+			_skeleton.set_bone_pose_rotation(b_idx, cur_rot.slerp(target_rot, minf(1.0, 14.0 * delta)))
+
 func _find_meshes(node: Node) -> void:
 	if node is GeometryInstance3D:
 		_meshes.append(node)
@@ -116,15 +230,17 @@ func _wants_climb() -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _process_movement(delta: float) -> void:
+	var is_moving := _input_vector() != Vector2.ZERO or velocity.length() > 0.2
 	# Sprint: Shift, only while grounded on a surface, moving, and with stamina.
 	_sprinting = _stuck and _stamina > 0.0 \
 			and Input.is_physical_key_pressed(KEY_SHIFT) \
-			and _input_vector() != Vector2.ZERO
+			and is_moving
 	if _stuck:
 		_walk_surface(delta)
 	else:
 		_air(delta)
 	_orient_model(delta)
+	_animate_skeleton(delta, is_moving and (_stuck or velocity.length() > 0.5), _sprinting)
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Movement, surface detection and stick force while pinned to a surface.
