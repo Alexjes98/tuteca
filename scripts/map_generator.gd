@@ -45,6 +45,11 @@ func _setup_environment() -> void:
 	env.background_mode = Environment.BG_CLEAR_COLOR
 	env.background_color = Color(0.02, 0.02, 0.03)  # Dark night outside
 	
+	# Ambient light setup: low energy for dark areas
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.04, 0.04, 0.06)  # Dim ambient light
+	env.ambient_light_energy = 0.15
+	
 	# Cinematic Tonemapping
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	
@@ -242,6 +247,20 @@ func _generate_map() -> void:
 	_spawn_block(Vector3(tv_x, 10.65, tv_z), Vector3(15.0, 8.5, 0.6), _plastic_mat)
 	# Shiny TV Screen panel
 	_spawn_block(Vector3(tv_x, 10.65, tv_z + 0.15), Vector3(14.2, 7.8, 0.4), _screen_mat)
+
+	# 9. Light Switch Box on the back wall next to the TV console
+	var switch_box_mat := StandardMaterial3D.new()
+	switch_box_mat.albedo_color = Color(0.05, 0.05, 0.05) # Sleek black box
+	switch_box_mat.roughness = 0.6
+	
+	var switch_btn_mat := StandardMaterial3D.new()
+	switch_btn_mat.albedo_color = Color(0.8, 0.2, 0.2)   # Bright red toggle button
+	switch_btn_mat.roughness = 0.3
+
+	# Back wall is at Z = -50.0 and has thickness 2.0, so the front face of the wall is at Z = -49.0.
+	# We place the switch box slightly in front of Z = -49.0 so it is fully visible in the room.
+	_spawn_block(Vector3(16.0, 14.0, -48.7), Vector3(0.6, 0.8, 0.4), switch_box_mat)
+	_spawn_block(Vector3(16.0, 14.0, -48.45), Vector3(0.2, 0.3, 0.1), switch_btn_mat)
 
 
 
