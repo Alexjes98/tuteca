@@ -116,14 +116,25 @@ func _update_character_ui() -> void:
 # data = Dictionary { "peer_id": int, "character": String }
 # ─────────────────────────────────────────────────────────────────────────────
 func _on_spawner_create(data: Dictionary) -> Node:
+	var entity: Node3D
 	if data["character"] == "ai_cat":
-		var ai_cat := _ai_cat_scene.instantiate()
-		ai_cat.name = "AICat"
-		return ai_cat
-	var scene: PackedScene = _player_scene if data["character"] == "gekko" else _cat_scene
-	var entity := scene.instantiate()
-	entity.name = str(data["peer_id"])
+		entity = _ai_cat_scene.instantiate()
+		entity.name = "AICat"
+	else:
+		var scene: PackedScene = _player_scene if data["character"] == "gekko" else _cat_scene
+		entity = scene.instantiate()
+		entity.name = str(data["peer_id"])
+	if data.has("pos"):
+		entity.position = data["pos"]
 	return entity
+
+## Team spawn zones at opposite ends of the 100x100 house so cats can never
+## insta-kill a gekko at round start (they spawn ~50+ m apart, beyond the AI
+## cat's 25 m vision range).
+func _spawn_position_for(character: String) -> Vector3:
+	if character == "gekko":
+		return Vector3(randf_range(-30.0, 30.0), 2.0, randf_range(-40.0, -25.0))
+	return Vector3(randf_range(-30.0, 30.0), 2.0, randf_range(25.0, 40.0))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UI Button handlers
@@ -209,7 +220,7 @@ func _spawn_player(id: int) -> void:
 	if players.has_node(str(id)):
 		return  # Guard against double-spawning
 	var character: String = _peer_characters.get(id, "gekko")
-	spawner.spawn({"peer_id": id, "character": character})
+	spawner.spawn({"peer_id": id, "character": character, "pos": _spawn_position_for(character)})
 	print("[Server] Spawned %s for peer %d" % [character, id])
 	
 	# Update team counts
@@ -238,7 +249,7 @@ func _spawn_ai_cat() -> void:
 		return
 	if players.has_node("AICat"):
 		return  # Only one AI cat at a time
-	spawner.spawn({"peer_id": 0, "character": "ai_cat"})
+	spawner.spawn({"peer_id": 0, "character": "ai_cat", "pos": _spawn_position_for("cat")})
 	print("[Server] AI cat spawned — run, Tuteca!")
 
 ## Called directly by the AI cat (server-side) when it touches a lizard.
@@ -380,12 +391,11 @@ func _restart_game() -> void:
 		if _peer_characters[peer_id] == "gekko":
 			lizards_count += 1
 			
-		# Uncapture and respawn players
+		# Uncapture and respawn players in their team's zone
 		var player_node = players.get_node_or_null(str(peer_id))
 		if player_node:
 			player_node.captured = false
-			# Random position around center
-			player_node.global_position = Vector3(randf_range(-15, 15), 2.0, randf_range(-15, 15))
+			player_node.global_position = _spawn_position_for(_peer_characters[peer_id])
 
 	total_lizards = lizards_count
 
