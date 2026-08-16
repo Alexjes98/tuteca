@@ -18,7 +18,7 @@ extends "res://scripts/base_character.gd"
 const STICK_FORCE   := 20.0   # Velocity pushed into the surface to keep contact
 const SURFACE_LERP  := 12.0   # How fast the surface normal rotates on transitions
 const MODEL_LERP    := 14.0   # How fast the model re-aligns to the surface
-const HOVER         := 0.24   # Capsule-center height above the surface
+const HOVER         := 0.38   # Capsule-center height above the surface
 const GROUND_RAY    := 0.55   # Down-probe length (along -surface_normal)
 const FWD_RAY       := 0.95   # Forward-probe length (wall detection)
 const MODEL_SCALE   := 0.85   # Preserve the ModelRoot scale from tuteca.tscn
@@ -78,11 +78,25 @@ var _meshes: Array[GeometryInstance3D] = []
 var _camo_sound_player: AudioStreamPlayer3D
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ── Skeleton procedural animation state ───────────────────────────────────────
+var _skeleton: Skeleton3D
+var _spine_bones: Array[int] = []
+var _tail_bones: Array[int] = []
+var _neck_bone: int = -1
+var _front_left_leg: int = -1
+var _front_right_leg: int = -1
+var _rear_left_leg: int = -1
+var _rear_right_leg: int = -1
+var _bone_rest_rotations: Dictionary = {}
+var _walk_phase: float = 0.0
+
+# ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	super()
 	add_to_group("lizards")
 	_build_hud()
 	_find_meshes(_model_root)
+	_setup_skeleton()
 	
 	# Dynamically add camouflage_transparency to MultiplayerSynchronizer so it replicates
 	for child in get_children():
@@ -102,6 +116,189 @@ func _ready() -> void:
 	_camo_sound_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 	add_child(_camo_sound_player)
 
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node as Skeleton3D
+	for child in node.get_children():
+		var res := _find_skeleton(child)
+		if res: return res
+	return null
+
+var _head_bone: int = -1
+@export var head_pitch_offset: float = 0.0
+@export var head_yaw_offset: float = 45.0
+@export var head_roll_offset: float = 0.0
+
+## Bone-space axis of the head bone that should point at the camera target.
+## GLTF/Blender rigs usually run +Y along the bone (snout) — flip here if the
+## head twists the wrong way in-game.
+@export_enum("+X:0", "-X:1", "+Y:2", "-Y:3", "+Z:4", "-Z:5") var head_forward_axis: int = 2
+
+## How fast the head tracks the camera (per-second lerp factor). Lower = lazier.
+@export var head_track_speed: float = 5.0
+## The look target never leaves this cone around the body's facing direction,
+## so the LookAtModifier3D is never pushed against its angle limits (crossing
+## them makes the clamped pose flip sides — instant "possessed head" jitter).
+const HEAD_CONE_ANGLE := deg_to_rad(85.0)
+
+## Eases the gait in/out and scales it with real speed (0 = idle, 1 = full sprint).
+var _gait_amp: float = 0.0
+## World-space point the LookAtModifier3D aims the head at (follows the camera).
+var _head_target: Node3D
+var _look_modifier: Node
+var _tail_spring: Node
+
+func _setup_skeleton() -> void:
+	_skeleton = _find_skeleton(_model_root)
+	if not _skeleton:
+		return
+
+	_spine_bones.clear()
+	_tail_bones.clear()
+	_bone_rest_rotations.clear()
+
+	for i in _skeleton.get_bone_count():
+		var b_name := _skeleton.get_bone_name(i)
+		_bone_rest_rotations[i] = _skeleton.get_bone_rest(i).basis.get_rotation_quaternion()
+		
+		if b_name in ["Spine", "Spine_02", "Spine_03"]:
+			_spine_bones.append(i)
+		if b_name == "Neck":
+			_neck_bone = i
+			print("NECK BASIS: ", _skeleton.get_bone_rest(i).basis)
+		elif b_name in ["Bone.004", "Head", "head"]:
+			_head_bone = i
+			print("HEAD BASIS: ", _skeleton.get_bone_rest(i).basis)
+		elif b_name == "Clavicle_L":
+			_front_left_leg = i
+		elif b_name == "Clavicle_R":
+			_front_right_leg = i
+		elif b_name in ["Bone.005", "Leg_L", "Thigh_L"]:
+			_rear_left_leg = i
+		elif b_name in ["Bone.014", "Leg_R", "Thigh_R"]:
+			_rear_right_leg = i
+		elif b_name in ["Bone.017", "Bone.018", "Bone.019", "Bone.020", "Bone.021"]:
+			_tail_bones.append(i)
+
+	_setup_modern_rig()
+
+## Attach engine-driven skeleton modifiers: LookAtModifier3D makes the head
+## track the camera and SpringBoneSimulator3D gives the tail physical inertia.
+## Both are guarded by ClassDB so older engine builds just skip them, and all
+## property access goes through set()/call() for the same reason.
+func _setup_modern_rig() -> void:
+	# Aim point for the head; parented to the body root so it ignores model yaw.
+	_head_target = Node3D.new()
+	_head_target.name = "HeadLookTarget"
+	add_child(_head_target)
+	_head_target.global_position = global_position + Vector3.FORWARD * 8.0
+
+	if _head_bone >= 0 and ClassDB.class_exists("LookAtModifier3D"):
+		var look: Node = ClassDB.instantiate("LookAtModifier3D")
+		look.name = "HeadLook"
+		_skeleton.add_child(look)
+		look.set("bone", _head_bone)
+		look.set("bone_name", _skeleton.get_bone_name(_head_bone))
+		look.set("target_node", look.get_path_to(_head_target))
+		look.set("forward_axis", head_forward_axis)
+		look.set("use_angle_limitation", true)
+		look.set("primary_limit_angle", deg_to_rad(120.0))
+		look.set("secondary_limit_angle", deg_to_rad(70.0))
+		_look_modifier = look
+
+	if _tail_bones.size() >= 2 and ClassDB.class_exists("SpringBoneSimulator3D"):
+		var spring: Node = ClassDB.instantiate("SpringBoneSimulator3D")
+		spring.name = "TailSpring"
+		_skeleton.add_child(spring)
+		if spring.has_method("set_chain_count"):
+			spring.call("set_chain_count", 1)
+			spring.call("set_root_bone_name", 0, _skeleton.get_bone_name(_tail_bones[0]))
+			spring.call("set_end_bone_name", 0, _skeleton.get_bone_name(_tail_bones[_tail_bones.size() - 1]))
+			if spring.has_method("set_stiffness"):
+				spring.call("set_stiffness", 0, 2.0)
+			if spring.has_method("set_drag"):
+				spring.call("set_drag", 0, 0.3)
+			if spring.has_method("set_radius"):
+				spring.call("set_radius", 0, 0.02)
+			_tail_spring = spring
+		else:
+			spring.queue_free()
+
+func _animate_skeleton(delta: float, is_moving: bool, _is_sprinting: bool) -> void:
+	if not _skeleton:
+		return
+
+	# Gait driven by real speed: amplitude eases in/out and frequency blends
+	# continuously from walk to sprint instead of switching between two modes.
+	var up := _surface_normal if _stuck else Vector3.UP
+	var planar_speed := _project(velocity, up).length()
+	var speed_frac := clampf(planar_speed / (SPEED * SPRINT_MULT), 0.0, 1.0)
+	if not is_moving:
+		speed_frac = 0.0
+	_gait_amp = lerpf(_gait_amp, speed_frac, minf(1.0, 8.0 * delta))
+	if _gait_amp > 0.002:
+		_walk_phase += delta * lerpf(7.0, 24.0, speed_frac)
+	else:
+		_walk_phase = 0.0
+	var amp := _gait_amp
+
+	var head_rot_offset := Quaternion.from_euler(Vector3(
+		deg_to_rad(head_pitch_offset),
+		deg_to_rad(head_yaw_offset),
+		deg_to_rad(head_roll_offset)
+	))
+
+	# ── Spine: traveling wave (head → tail), amplitude grows toward the rear —
+	# the lateral undulation real lizards use, instead of one rigid S-flex. ──
+	for i in _spine_bones.size():
+		var b_idx: int = _spine_bones[i]
+		if b_idx in _bone_rest_rotations:
+			var phase := _walk_phase - (i + 1) * 0.9
+			var seg_amp := 0.14 * (0.6 + 0.4 * i) * amp
+			var rot := Quaternion(Vector3.UP, sin(phase) * seg_amp)
+			_skeleton.set_bone_pose_rotation(b_idx, _bone_rest_rotations[b_idx] * rot)
+
+	# ── Neck: slight counter-swing keeps the snout steady while the body waves ──
+	if _neck_bone >= 0 and _neck_bone in _bone_rest_rotations:
+		var neck_counter := Quaternion(Vector3.UP, -sin(_walk_phase) * 0.06 * amp)
+		_skeleton.set_bone_pose_rotation(_neck_bone, head_rot_offset * _bone_rest_rotations[_neck_bone] * neck_counter)
+
+	# Head: posed manually only when the LookAtModifier3D isn't driving it
+	# (the modifier runs after this and would override the pose anyway).
+	if _look_modifier == null and _head_bone >= 0 and _head_bone in _bone_rest_rotations:
+		_skeleton.set_bone_pose_rotation(_head_bone, head_rot_offset * _bone_rest_rotations[_head_bone])
+
+	# ── Tail: continues the spine wave with growing amplitude toward the tip.
+	# Kept subtle when the SpringBoneSimulator3D is active, since the spring
+	# layers its own inertia and lag on top of this pose. ──
+	var tail_amp := 0.06 if _tail_spring else 0.12
+	for t_i in _tail_bones.size():
+		var b_idx: int = _tail_bones[t_i]
+		if b_idx in _bone_rest_rotations:
+			var phase := _walk_phase - (_spine_bones.size() + t_i + 1) * 0.9
+			var rot := Quaternion(Vector3.UP, sin(phase) * tail_amp * (1.0 + t_i * 0.4) * amp)
+			_skeleton.set_bone_pose_rotation(b_idx, _bone_rest_rotations[b_idx] * rot)
+
+	# ── Legs: diagonal pairs (FL+RR vs FR+RL), the sprawling lizard gait ──
+	var swing := sin(_walk_phase)
+	var swing_op := sin(_walk_phase + PI)
+	var swing_amp := lerpf(0.24, 0.42, speed_frac) * amp
+	var lift_amp := lerpf(0.12, 0.22, speed_frac) * amp
+	_pose_leg(_front_left_leg, swing, swing_amp, lift_amp)
+	_pose_leg(_rear_right_leg, swing, swing_amp, lift_amp)
+	_pose_leg(_front_right_leg, swing_op, swing_amp, lift_amp)
+	_pose_leg(_rear_left_leg, swing_op, swing_amp, lift_amp)
+
+	# ── Body bob: one dip per footfall (two per full cycle), along the model's
+	# own up axis so it also works while stuck to walls or ceilings ──
+	_model_root.position = _model_root.transform.basis.y.normalized() \
+			* (absf(sin(_walk_phase)) * 0.03 * amp)
+
+func _pose_leg(b_idx: int, swing: float, swing_amp: float, lift_amp: float) -> void:
+	if b_idx >= 0 and b_idx in _bone_rest_rotations:
+		var rot := Quaternion(Vector3.UP, swing * swing_amp) * Quaternion(Vector3.RIGHT, maxf(0.0, swing) * lift_amp)
+		_skeleton.set_bone_pose_rotation(b_idx, _bone_rest_rotations[b_idx] * rot)
+
 func _find_meshes(node: Node) -> void:
 	if node is GeometryInstance3D:
 		_meshes.append(node)
@@ -117,15 +314,17 @@ func _wants_climb() -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _process_movement(delta: float) -> void:
+	var is_moving := _input_vector() != Vector2.ZERO or velocity.length() > 0.2
 	# Sprint: Shift, only while grounded on a surface, moving, and with stamina.
 	_sprinting = _stuck and _stamina > 0.0 \
 			and Input.is_physical_key_pressed(KEY_SHIFT) \
-			and _input_vector() != Vector2.ZERO
+			and is_moving
 	if _stuck:
 		_walk_surface(delta)
 	else:
 		_air(delta)
 	_orient_model(delta)
+	_animate_skeleton(delta, is_moving and (_stuck or velocity.length() > 0.5), _sprinting)
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Movement, surface detection and stick force while pinned to a surface.
@@ -196,7 +395,7 @@ func _walk_surface(delta: float) -> void:
 			target_normal = _surface_normal
 
 	# Rotate our up toward the detected surface, then rebuild movement on it.
-	_surface_normal = _surface_normal.slerp(target_normal, minf(1.0, SURFACE_LERP * delta)).normalized()
+	_surface_normal = _slerp_normal(_surface_normal, target_normal, minf(1.0, SURFACE_LERP * delta))
 	up_direction = _surface_normal
 
 	# Stamina: clinging to walls/ceilings and/or sprinting drain it. On a wall or
@@ -302,8 +501,10 @@ func _orient_model(delta: float) -> void:
 
 	var x := fwd.cross(up).normalized()
 	var target := Basis(x, up, -fwd)
-	var cur := _model_root.transform.basis.orthonormalized()
-	var blended := cur.slerp(target, minf(1.0, MODEL_LERP * delta))
+	# Slerp via quaternions: get_rotation_quaternion() strips scale and fixes
+	# reflected bases, avoiding the "must be normalized to be casted" error.
+	var cur_q := _model_root.transform.basis.get_rotation_quaternion()
+	var blended := Basis(cur_q.slerp(target.get_rotation_quaternion(), minf(1.0, MODEL_LERP * delta)))
 	_model_root.transform.basis = blended.scaled(Vector3(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +523,24 @@ func _input_vector() -> Vector2:
 ## Project a vector onto the plane whose normal is n (removes the n component).
 func _project(v: Vector3, n: Vector3) -> Vector3:
 	return v - v.dot(n) * n
+
+## Spherically interpolate between two directions without Vector3.slerp, whose
+## internal rotation axis can fail the is_normalized() check from float error
+## when the vectors are nearly (anti)parallel. Always returns a unit vector.
+func _slerp_normal(from: Vector3, to: Vector3, t: float) -> Vector3:
+	from = from.normalized()
+	to = to.normalized()
+	var d := clampf(from.dot(to), -1.0, 1.0)
+	if d > 0.9999:
+		return to
+	var axis := from.cross(to)
+	if axis.length_squared() < 1e-8:
+		# Antiparallel: any perpendicular axis works for the 180° flip.
+		axis = from.cross(Vector3.UP)
+		if axis.length_squared() < 1e-8:
+			axis = from.cross(Vector3.RIGHT)
+	axis = axis.normalized()
+	return from.rotated(axis, acos(d) * t).normalized()
 
 ## Build a movement vector from WASD using the camera's real orientation
 ## (forward + right, pitch included), projected onto the surface plane n.
@@ -409,6 +628,23 @@ func _build_hud() -> void:
 
 # Position, aim-at-camera, and fill the bar. Visuals only → runs in _process.
 func _process(delta: float) -> void:
+	# Aim point for the LookAtModifier3D-driven head. The camera rotates
+	# instantly with the mouse, so the raw aim point can sweep meters per
+	# frame — the target itself is cone-clamped and smoothed so the head
+	# turns at a controlled, lizard-like pace instead of snapping.
+	if _head_target:
+		var fwd := -_model_root.global_transform.basis.z.normalized()
+		var aim_dir := fwd
+		if is_multiplayer_authority() and camera:
+			aim_dir = -camera.global_transform.basis.z.normalized()
+		# Keep the aim inside a forward cone relative to the body.
+		var ang := fwd.angle_to(aim_dir)
+		if ang > HEAD_CONE_ANGLE:
+			aim_dir = _slerp_normal(fwd, aim_dir, HEAD_CONE_ANGLE / ang)
+		var desired := global_position + aim_dir * 8.0
+		_head_target.global_position = _head_target.global_position.lerp(
+				desired, minf(1.0, head_track_speed * delta))
+
 	if is_multiplayer_authority():
 		var is_still := _stuck and _input_vector().length() < 0.01 and velocity.slide(_surface_normal).length() < 0.05
 		if is_still:

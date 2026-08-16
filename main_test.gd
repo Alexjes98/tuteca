@@ -28,6 +28,7 @@ const MAX_PEERS  := 8
 @onready var lizards_label: Label = $CanvasLayer/HUD/MarginContainer/HBoxContainer/LizardsLabel
 @onready var game_over_panel: ColorRect = $CanvasLayer/GameOverPanel
 @onready var win_label: Label = $CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer/WinLabel
+@onready var restart_btn: Button = $CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer/RestartButton
 @onready var chat_ui: Control = $CanvasLayer/HUD/ChatUI
 
 ## Replicated game variables (replicated via MultiplayerSynchronizer)
@@ -46,6 +47,7 @@ var _switch_prompt: Label
 
 var _player_scene := preload("res://game_objects/tuteca.tscn")
 var _cat_scene    := preload("res://game_objects/cat.tscn")
+var _ai_cat_scene := preload("res://game_objects/ai_cat.tscn")
 
 ## The character this local player has chosen.
 var _chosen_character: String = "gekko"
@@ -109,6 +111,7 @@ func _ready() -> void:
 	# ── Character selection buttons ───────────────────────────────────────
 	gekko_btn.pressed.connect(_on_gekko_selected)
 	cat_btn.pressed.connect(_on_cat_selected)
+	restart_btn.pressed.connect(_on_restart_pressed)
 	_update_character_ui()   # highlight default selection
 
 	if chat_ui:
@@ -147,10 +150,25 @@ func _update_character_ui() -> void:
 # data = Dictionary { "peer_id": int, "character": String }
 # ─────────────────────────────────────────────────────────────────────────────
 func _on_spawner_create(data: Dictionary) -> Node:
-	var scene: PackedScene = _player_scene if data["character"] == "gekko" else _cat_scene
-	var entity := scene.instantiate()
-	entity.name = str(data["peer_id"])
+	var entity: Node3D
+	if data["character"] == "ai_cat":
+		entity = _ai_cat_scene.instantiate()
+		entity.name = "AICat"
+	else:
+		var scene: PackedScene = _player_scene if data["character"] == "gekko" else _cat_scene
+		entity = scene.instantiate()
+		entity.name = str(data["peer_id"])
+	if data.has("pos"):
+		entity.position = data["pos"]
 	return entity
+
+## Team spawn zones at opposite ends of the 100x100 house so cats can never
+## insta-kill a gekko at round start (they spawn ~50+ m apart, beyond the AI
+## cat's 25 m vision range).
+func _spawn_position_for(character: String) -> Vector3:
+	if character == "gekko":
+		return Vector3(randf_range(-30.0, 30.0), 2.0, randf_range(-40.0, -25.0))
+	return Vector3(randf_range(-30.0, 30.0), 2.0, randf_range(25.0, 40.0))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UI Button handlers
@@ -236,12 +254,14 @@ func _spawn_player(id: int) -> void:
 	if players.has_node(str(id)):
 		return  # Guard against double-spawning
 	var character: String = _peer_characters.get(id, "gekko")
-	spawner.spawn({"peer_id": id, "character": character})
+	spawner.spawn({"peer_id": id, "character": character, "pos": _spawn_position_for(character)})
 	print("[Server] Spawned %s for peer %d" % [character, id])
 	
 	# Update team counts
 	if character == "gekko":
 		total_lizards += 1
+		# A Tuteca always faces an AI cat — spawn it if none exists yet.
+		_spawn_ai_cat()
 		
 	# Transition from lobby to playing automatically when first player spawns
 	if game_state == "lobby":
@@ -254,6 +274,28 @@ func _spawn_player(id: int) -> void:
 		# Wait a physics frame for crickets to spawn
 		await get_tree().physics_frame
 		total_crickets = cricket_spawner.get_child_count()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI cat — server-only spawn (replicated to clients via the MultiplayerSpawner)
+# ─────────────────────────────────────────────────────────────────────────────
+func _spawn_ai_cat() -> void:
+	if not multiplayer.is_server():
+		return
+	if players.has_node("AICat"):
+		return  # Only one AI cat at a time
+	spawner.spawn({"peer_id": 0, "character": "ai_cat", "pos": _spawn_position_for("cat")})
+	print("[Server] AI cat spawned — run, Tuteca!")
+
+## Called directly by the AI cat (server-side) when it touches a lizard.
+func ai_capture_player(target_peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var player_node = players.get_node_or_null(str(target_peer_id))
+	if player_node and not player_node.captured:
+		player_node.captured = true
+		captured_lizards += 1
+		print("[Server] AI cat caught lizard %d! Total: %d/%d" % [target_peer_id, captured_lizards, total_lizards])
+		_check_win_conditions()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Local Process Loop: updates HUD text and runs server countdown timer
@@ -321,6 +363,15 @@ func _process(delta: float) -> void:
 				_switch_prompt.visible = true
 			else:
 				_switch_prompt.visible = false
+		
+	elif game_state == "game_over":
+		lobby_ui.hide()
+		hud.hide()
+		game_over_panel.show()
+		win_label.text = "%s Win!" % winner_name
+		# Free the mouse so the player can click the restart button.
+		if Input.get_mouse_mode() != Input.MOUSE_MODE_VISIBLE:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Server-side gameplay logic
@@ -376,10 +427,21 @@ func _end_game(winner: String) -> void:
 	game_state = "game_over"
 	winner_name = winner
 	print("[Server] Game Over! Winner: %s" % winner)
-	
-	# Wait 5 seconds and restart
-	await get_tree().create_timer(5.0).timeout
-	_restart_game()
+	# The game stays on the game-over screen until someone clicks "Comenzar".
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Restart button — any peer can click it; the server performs the restart.
+# ─────────────────────────────────────────────────────────────────────────────
+func _on_restart_pressed() -> void:
+	if multiplayer.is_server():
+		_restart_game()
+	else:
+		_rpc_request_restart.rpc_id(1)
+
+@rpc("any_peer", "reliable")
+func _rpc_request_restart() -> void:
+	if multiplayer.is_server() and game_state == "game_over":
+		_restart_game()
 
 func _restart_game() -> void:
 	if not multiplayer.is_server():
@@ -403,14 +465,18 @@ func _restart_game() -> void:
 		if _peer_characters[peer_id] == "gekko":
 			lizards_count += 1
 			
-		# Uncapture and respawn players
+		# Uncapture and respawn players in their team's zone
 		var player_node = players.get_node_or_null(str(peer_id))
 		if player_node:
 			player_node.captured = false
-			# Random position around center
-			player_node.global_position = Vector3(randf_range(-15, 15), 2.0, randf_range(-15, 15))
-			
+			player_node.global_position = _spawn_position_for(_peer_characters[peer_id])
+
 	total_lizards = lizards_count
+
+	# Move AI cats away from the respawn area so nobody dies instantly.
+	for ai_cat in get_tree().get_nodes_in_group("ai_cats"):
+		if ai_cat.has_method("reset_for_new_round"):
+			ai_cat.reset_for_new_round()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Team Chat RPCs & Routing

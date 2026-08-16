@@ -1,0 +1,21 @@
+[gd_scene format=3 uid="uid://dai0catnpc0a1"]
+
+[ext_resource type="PackedScene" uid="uid://b3asiofci4fb7" path="res://assets/3D/Cat.glb" id="1_cat"]
+[ext_resource type="Script" path="res://scripts/ai_cat.gd" id="2_script"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_aicat"]
+radius = 1.8
+
+[node name="AICat" type="CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 8.0)
+script = ExtResource("2_script")
+
+[node name="ModelRoot" type="Node3D" parent="."]
+transform = Transform3D(26, 0, 0, 0, 26, 0, 0, 0, 26, 0, -0.285, 0)
+
+[node name="Cat" parent="ModelRoot" instance=ExtResource("1_cat")]
+transform = Transform3D(-3.42, 0, 5.1640563e-07, 0, 3.42, 0, -5.1640563e-07, 0, -3.42, 0, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, -0.371)
+shape = SubResource("SphereShape3D_aicat")
