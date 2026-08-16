@@ -46,6 +46,107 @@ func _setup_environment(map_type: String) -> void:
 	if dir_light and dir_light is DirectionalLight3D:
 		dir_light.light_energy = 0.1
 		dir_light.light_color = Color(0.6, 0.7, 0.9)  # Cool moonlight
+	# Programmatic WorldEnvironment setup for AAA post-processing
+	var world_env := WorldEnvironment.new()
+	var env := Environment.new()
+	
+	env.background_mode = Environment.BG_CLEAR_COLOR
+	env.background_color = Color(0.02, 0.02, 0.03)  # Dark night outside
+	
+	# Ambient light setup
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	if map_type == "Sunroom Library":
+		env.ambient_light_color = Color(0.25, 0.23, 0.2)  # Cozy warm ambient fill
+		env.ambient_light_energy = 1.6 # Brighten up shadow areas
+	else:
+		env.ambient_light_color = Color(0.04, 0.04, 0.06)  # Dim ambient light for Map 1
+		env.ambient_light_energy = 0.15
+	
+	# Cinematic Tonemapping
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	
+	# Glow & Bloom
+	env.glow_enabled = true
+	env.glow_intensity = 0.6
+	env.glow_strength = 1.0
+	env.glow_bloom = 0.12
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
+	
+	# Screen-Space Ambient Occlusion (SSAO) for contact shadows (adds huge depth)
+	env.ssao_enabled = true
+	env.ssao_radius = 3.0
+	env.ssao_intensity = 4.0
+	
+	# Screen-Space Reflections (SSR) for shiny table tops
+	env.ssr_enabled = true
+	
+	world_env.environment = env
+	add_child(world_env)
+	
+	if map_type == "Sunroom Library":
+		# Create cinema-grade ceiling ambient lighting (soft warm glow)
+		var light_positions := [
+			Vector3(-25.0, ROOM_HEIGHT - 2.0, -25.0),
+			Vector3(25.0, ROOM_HEIGHT - 2.0, -25.0),
+			Vector3(-25.0, ROOM_HEIGHT - 2.0, 25.0),
+			Vector3(25.0, ROOM_HEIGHT - 2.0, 25.0)
+		]
+		for l_pos in light_positions:
+			var light := OmniLight3D.new()
+			light.position = l_pos
+			light.light_color = Color(1.0, 0.9, 0.8)  # Warm bright tungsten light
+			light.light_energy = 24.0
+			light.omni_range = 80.0
+			light.shadow_enabled = shadows_on
+			light.shadow_bias = 0.05
+			add_child(light)
+
+		# Add center warm pendant drop lights to illuminate the central sunroom section
+		for lx in [-15.0, 15.0]:
+			var drop_light := OmniLight3D.new()
+			drop_light.position = Vector3(lx, 22.0, 0.0)
+			drop_light.light_color = Color(1.0, 0.95, 0.85)
+			drop_light.light_energy = 22.0
+			drop_light.omni_range = 65.0
+			drop_light.shadow_enabled = shadows_on
+			add_child(drop_light)
+
+		# Optional: Background Ambient Music (Sunroom Library only)
+		if FileAccess.file_exists("res://assets/sounds/library_music.ogg"):
+			var music_player := AudioStreamPlayer.new()
+			music_player.stream = load("res://assets/sounds/library_music.ogg")
+			music_player.volume_db = -18.0 # Soft background volume
+			music_player.autoplay = true
+			add_child(music_player)
+			print("[Audio] Ambient library music loaded and playing.")
+
+		# Optional: 3D Fireplace Crackle Ambience (Sunroom Library only)
+		if FileAccess.file_exists("res://assets/sounds/fireplace_crackle.ogg"):
+			var fire_player := AudioStreamPlayer3D.new()
+			fire_player.stream = load("res://assets/sounds/fireplace_crackle.ogg")
+			fire_player.position = Vector3(0.0, 3.0, -47.0) # Centered in fireplace hearth
+			fire_player.unit_size = 5.0
+			fire_player.max_distance = 25.0
+			fire_player.autoplay = true
+			add_child(fire_player)
+			print("[Audio] Fireplace crackle 3D ambience loaded and playing.")
+	else:
+		# Map 1: Standard layout lights for Basic House (original cozy/mood levels)
+		var light_positions := [
+			Vector3(-MAP_SIZE * 0.25, ROOM_HEIGHT - 3.0, -MAP_SIZE * 0.25),
+			Vector3(MAP_SIZE * 0.25, ROOM_HEIGHT - 3.0, -MAP_SIZE * 0.25),
+			Vector3(-MAP_SIZE * 0.25, ROOM_HEIGHT - 3.0, MAP_SIZE * 0.25),
+			Vector3(MAP_SIZE * 0.25, ROOM_HEIGHT - 3.0, MAP_SIZE * 0.25)
+		]
+		for l_pos in light_positions:
+			var light := OmniLight3D.new()
+			light.position = l_pos
+			light.light_color = Color(1.0, 0.88, 0.75)  # Cozy warm tungsten light
+			light.light_energy = 8.0
+			light.omni_range = 60.0
+			light.shadow_enabled = shadows_on
+			light.shadow_bias = 0.05
+			add_child(light)
 
 	# Configure WorldEnvironment settings per-map
 	var world_env = get_parent().find_child("WorldEnvironment", true, false)
@@ -332,13 +433,15 @@ func _generate_basic_house() -> void:
 	# Shiny TV Screen panel
 	_spawn_block(Vector3(tv_x, 10.65, tv_z + 0.15), Vector3(14.2, 7.8, 0.4), _screen_mat)
 
-	# 9. Compatibility Light Switch (positioned at Y = 14.0 on back wall)
+	# 9. Light Switch Box on the back wall next to the TV console (positioned at Y = 14.0 on back wall)
 	var switch_box_mat := StandardMaterial3D.new()
-	switch_box_mat.albedo_color = Color(0.05, 0.05, 0.05)
+	switch_box_mat.albedo_color = Color(0.05, 0.05, 0.05) # Sleek black box
 	switch_box_mat.roughness = 0.6
+	
 	var switch_btn_mat := StandardMaterial3D.new()
-	switch_btn_mat.albedo_color = Color(0.8, 0.2, 0.2)
+	switch_btn_mat.albedo_color = Color(0.8, 0.2, 0.2)   # Bright red toggle button
 	switch_btn_mat.roughness = 0.3
+
 	_spawn_block(Vector3(16.0, 14.0, -48.7), Vector3(0.6, 0.8, 0.4), switch_box_mat)
 	_spawn_block(Vector3(16.0, 14.0, -48.45), Vector3(0.2, 0.3, 0.1), switch_btn_mat)
 
