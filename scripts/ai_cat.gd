@@ -185,7 +185,9 @@ func _face_direction(direction: Vector3, delta: float) -> void:
 			_model_root.rotation.y, target_yaw, minf(TURN_SPEED * delta, 1.0))
 
 # ─────────────────────────────────────────────────────────────────────────────
-## Called by main on restart: move away from the players' respawn area.
+## Called by main on restart: back to the cat-team zone, far from the gekkos.
 func reset_for_new_round() -> void:
-	global_position = Vector3(randf_range(-12.0, 12.0), 2.0, randf_range(18.0, 24.0))
+	global_position = Vector3(randf_range(-30.0, 30.0), 2.0, randf_range(25.0, 40.0))
 	velocity = Vector3.ZERO
+	_sight_timer = 0.0
+	_wander_dir = Vector3.ZERO
