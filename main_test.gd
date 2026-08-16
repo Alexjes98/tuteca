@@ -1167,7 +1167,6 @@ func _process(delta: float) -> void:
 		if _compass_bar:
 			_compass_bar.visible = true
 			
-		var local_player = players.get_node_or_null(str(multiplayer.get_unique_id()))
 		if local_player and is_instance_valid(local_player) and _compass_bar:
 			var cam = local_player.get_node_or_null("CameraPivot/SpringArm3D/Camera3D")
 			if cam:
