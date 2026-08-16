@@ -86,8 +86,10 @@ func _align_cricket(cricket: Node3D, pos: Vector3, normal: Vector3) -> void:
 		var ref := Vector3.FORWARD if abs(n.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT
 		tangent = ref.cross(n)
 	tangent = tangent.normalized()
-	var bitangent := n.cross(tangent).normalized()
-	
+	# tangent × n keeps the basis right-handed (X × Y = Z); n × tangent would
+	# build a reflected (det -1) basis that can't be cast to a Quaternion.
+	var bitangent := tangent.cross(n).normalized()
+
 	var b := Basis(tangent, n, bitangent).orthonormalized()
 	var surface_offset := 0.59816116
 	cricket.global_transform = Transform3D(b, pos + n * surface_offset)

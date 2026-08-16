@@ -28,6 +28,7 @@ const MAX_PEERS  := 8
 @onready var lizards_label: Label = $CanvasLayer/HUD/MarginContainer/HBoxContainer/LizardsLabel
 @onready var game_over_panel: ColorRect = $CanvasLayer/GameOverPanel
 @onready var win_label: Label = $CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer/WinLabel
+@onready var restart_btn: Button = $CanvasLayer/GameOverPanel/CenterContainer/VBoxContainer/RestartButton
 @onready var chat_ui: Control = $CanvasLayer/HUD/ChatUI
 
 ## Replicated game variables (replicated via MultiplayerSynchronizer)
@@ -41,6 +42,7 @@ var winner_name: String = ""
 
 var _player_scene := preload("res://game_objects/tuteca.tscn")
 var _cat_scene    := preload("res://game_objects/cat.tscn")
+var _ai_cat_scene := preload("res://game_objects/ai_cat.tscn")
 
 ## The character this local player has chosen.
 var _chosen_character: String = "gekko"
@@ -82,6 +84,7 @@ func _ready() -> void:
 	# ── Character selection buttons ───────────────────────────────────────
 	gekko_btn.pressed.connect(_on_gekko_selected)
 	cat_btn.pressed.connect(_on_cat_selected)
+	restart_btn.pressed.connect(_on_restart_pressed)
 	_update_character_ui()   # highlight default selection
 
 	if chat_ui:
@@ -113,6 +116,10 @@ func _update_character_ui() -> void:
 # data = Dictionary { "peer_id": int, "character": String }
 # ─────────────────────────────────────────────────────────────────────────────
 func _on_spawner_create(data: Dictionary) -> Node:
+	if data["character"] == "ai_cat":
+		var ai_cat := _ai_cat_scene.instantiate()
+		ai_cat.name = "AICat"
+		return ai_cat
 	var scene: PackedScene = _player_scene if data["character"] == "gekko" else _cat_scene
 	var entity := scene.instantiate()
 	entity.name = str(data["peer_id"])
@@ -208,6 +215,8 @@ func _spawn_player(id: int) -> void:
 	# Update team counts
 	if character == "gekko":
 		total_lizards += 1
+		# A Tuteca always faces an AI cat — spawn it if none exists yet.
+		_spawn_ai_cat()
 		
 	# Transition from lobby to playing automatically when first player spawns
 	if game_state == "lobby":
@@ -220,6 +229,28 @@ func _spawn_player(id: int) -> void:
 		# Wait a physics frame for crickets to spawn
 		await get_tree().physics_frame
 		total_crickets = cricket_spawner.get_child_count()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI cat — server-only spawn (replicated to clients via the MultiplayerSpawner)
+# ─────────────────────────────────────────────────────────────────────────────
+func _spawn_ai_cat() -> void:
+	if not multiplayer.is_server():
+		return
+	if players.has_node("AICat"):
+		return  # Only one AI cat at a time
+	spawner.spawn({"peer_id": 0, "character": "ai_cat"})
+	print("[Server] AI cat spawned — run, Tuteca!")
+
+## Called directly by the AI cat (server-side) when it touches a lizard.
+func ai_capture_player(target_peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var player_node = players.get_node_or_null(str(target_peer_id))
+	if player_node and not player_node.captured:
+		player_node.captured = true
+		captured_lizards += 1
+		print("[Server] AI cat caught lizard %d! Total: %d/%d" % [target_peer_id, captured_lizards, total_lizards])
+		_check_win_conditions()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Local Process Loop: updates HUD text and runs server countdown timer
@@ -253,6 +284,9 @@ func _process(delta: float) -> void:
 		hud.hide()
 		game_over_panel.show()
 		win_label.text = "%s Win!" % winner_name
+		# Free the mouse so the player can click the restart button.
+		if Input.get_mouse_mode() != Input.MOUSE_MODE_VISIBLE:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Server-side gameplay logic
@@ -308,10 +342,21 @@ func _end_game(winner: String) -> void:
 	game_state = "game_over"
 	winner_name = winner
 	print("[Server] Game Over! Winner: %s" % winner)
-	
-	# Wait 5 seconds and restart
-	await get_tree().create_timer(5.0).timeout
-	_restart_game()
+	# The game stays on the game-over screen until someone clicks "Comenzar".
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Restart button — any peer can click it; the server performs the restart.
+# ─────────────────────────────────────────────────────────────────────────────
+func _on_restart_pressed() -> void:
+	if multiplayer.is_server():
+		_restart_game()
+	else:
+		_rpc_request_restart.rpc_id(1)
+
+@rpc("any_peer", "reliable")
+func _rpc_request_restart() -> void:
+	if multiplayer.is_server() and game_state == "game_over":
+		_restart_game()
 
 func _restart_game() -> void:
 	if not multiplayer.is_server():
@@ -341,8 +386,13 @@ func _restart_game() -> void:
 			player_node.captured = false
 			# Random position around center
 			player_node.global_position = Vector3(randf_range(-15, 15), 2.0, randf_range(-15, 15))
-			
+
 	total_lizards = lizards_count
+
+	# Move AI cats away from the respawn area so nobody dies instantly.
+	for ai_cat in get_tree().get_nodes_in_group("ai_cats"):
+		if ai_cat.has_method("reset_for_new_round"):
+			ai_cat.reset_for_new_round()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Team Chat RPCs & Routing

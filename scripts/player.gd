@@ -195,7 +195,7 @@ func _walk_surface(delta: float) -> void:
 			target_normal = _surface_normal
 
 	# Rotate our up toward the detected surface, then rebuild movement on it.
-	_surface_normal = _surface_normal.slerp(target_normal, minf(1.0, SURFACE_LERP * delta)).normalized()
+	_surface_normal = _slerp_normal(_surface_normal, target_normal, minf(1.0, SURFACE_LERP * delta))
 	up_direction = _surface_normal
 
 	# Stamina: clinging to walls/ceilings and/or sprinting drain it. On a wall or
@@ -301,8 +301,10 @@ func _orient_model(delta: float) -> void:
 
 	var x := fwd.cross(up).normalized()
 	var target := Basis(x, up, -fwd)
-	var cur := _model_root.transform.basis.orthonormalized()
-	var blended := cur.slerp(target, minf(1.0, MODEL_LERP * delta))
+	# Slerp via quaternions: get_rotation_quaternion() strips scale and fixes
+	# reflected bases, avoiding the "must be normalized to be casted" error.
+	var cur_q := _model_root.transform.basis.get_rotation_quaternion()
+	var blended := Basis(cur_q.slerp(target.get_rotation_quaternion(), minf(1.0, MODEL_LERP * delta)))
 	_model_root.transform.basis = blended.scaled(Vector3(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,6 +323,24 @@ func _input_vector() -> Vector2:
 ## Project a vector onto the plane whose normal is n (removes the n component).
 func _project(v: Vector3, n: Vector3) -> Vector3:
 	return v - v.dot(n) * n
+
+## Spherically interpolate between two directions without Vector3.slerp, whose
+## internal rotation axis can fail the is_normalized() check from float error
+## when the vectors are nearly (anti)parallel. Always returns a unit vector.
+func _slerp_normal(from: Vector3, to: Vector3, t: float) -> Vector3:
+	from = from.normalized()
+	to = to.normalized()
+	var d := clampf(from.dot(to), -1.0, 1.0)
+	if d > 0.9999:
+		return to
+	var axis := from.cross(to)
+	if axis.length_squared() < 1e-8:
+		# Antiparallel: any perpendicular axis works for the 180° flip.
+		axis = from.cross(Vector3.UP)
+		if axis.length_squared() < 1e-8:
+			axis = from.cross(Vector3.RIGHT)
+	axis = axis.normalized()
+	return from.rotated(axis, acos(d) * t).normalized()
 
 ## Build a movement vector from WASD using the camera's real orientation
 ## (forward + right, pitch included), projected onto the surface plane n.
