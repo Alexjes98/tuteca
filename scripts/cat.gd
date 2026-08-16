@@ -29,6 +29,8 @@ var _last_wall_normal: Vector3 = Vector3.ZERO
 var _scratch_cast: ShapeCast3D
 var _default_fov: float = 75.0
 var _shift_down: bool = false
+var _headlight: OmniLight3D
+var _nightvision_overlay: ColorRect
 
 # UI references
 @onready var cat_ui: CanvasLayer = $CatUI
@@ -45,6 +47,25 @@ func _ready() -> void:
 	
 	if is_multiplayer_authority() and camera:
 		_default_fov = camera.fov
+		
+		# Create local headlight/flashlight for the Cat to see in front of them
+		_headlight = OmniLight3D.new()
+		_headlight.light_energy = 5.0
+		_headlight.omni_range = 120.0
+		_headlight.omni_attenuation = 0.5
+		_headlight.light_color = Color(0.2, 0.8, 0.2) # Cool green nightvision glow
+		_headlight.shadow_enabled = false # No shadows, so no under-cat shadows
+		_headlight.visible = false  # Start hidden, only active in darkness
+		camera.add_child(_headlight)
+
+		# Create a full-screen green nightvision overlay on the HUD
+		_nightvision_overlay = ColorRect.new()
+		_nightvision_overlay.anchor_right = 1.0
+		_nightvision_overlay.anchor_bottom = 1.0
+		_nightvision_overlay.color = Color(0.0, 1.0, 0.0, 0.08) # Subtle green tint overlay
+		_nightvision_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_nightvision_overlay.visible = false
+		cat_ui.add_child(_nightvision_overlay)
 	
 	# Instantiate and configure ShapeCast3D for scratch hit detection
 	_scratch_cast = ShapeCast3D.new()
@@ -68,6 +89,15 @@ func _process_special(delta: float) -> void:
 	# Tick down the pounce cooldown
 	if _pounce_timer > 0.0:
 		_pounce_timer = max(_pounce_timer - delta, 0.0)
+		
+	# Update local headlight visibility based on map lights_on status
+	if is_multiplayer_authority() and _headlight != null:
+		var main_scene = get_tree().current_scene
+		if main_scene and "lights_on" in main_scene:
+			var nightvision_active = not main_scene.lights_on
+			_headlight.visible = nightvision_active
+			if _nightvision_overlay != null:
+				_nightvision_overlay.visible = nightvision_active
 		
 	# Update the cooldown indicator bar locally
 	if is_multiplayer_authority():

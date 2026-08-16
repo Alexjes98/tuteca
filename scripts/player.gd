@@ -109,7 +109,8 @@ func _ready() -> void:
 	if stream:
 		stream.loop = true
 	_camo_sound_player.stream = stream
-	_camo_sound_player.volume_db = -12.0  # Reduced base volume
+	# Set local player volume very low (-26dB) so it doesn't annoy the gecko, but remote players hear it at normal level (-12dB)
+	_camo_sound_player.volume_db = -26.0 if is_multiplayer_authority() else -12.0
 	_camo_sound_player.unit_size = 4.5    # Slower drop-off
 	_camo_sound_player.max_distance = 24.0 # Silent beyond 24 meters
 	_camo_sound_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE

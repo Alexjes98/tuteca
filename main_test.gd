@@ -40,6 +40,11 @@ var captured_lizards: int = 0
 var game_state: String = "lobby"
 var winner_name: String = ""
 
+# Light Switch state variables
+var lights_on: bool = true
+var lights_cooldown: float = 0.0
+var _switch_prompt: Label
+
 var _player_scene := preload("res://game_objects/tuteca.tscn")
 var _cat_scene    := preload("res://game_objects/cat.tscn")
 var _ai_cat_scene := preload("res://game_objects/ai_cat.tscn")
@@ -70,10 +75,32 @@ func _ready() -> void:
 	config.add_property(".:captured_lizards")
 	config.add_property(".:game_state")
 	config.add_property(".:winner_name")
+	config.add_property(".:lights_on")
+	config.add_property(".:lights_cooldown")
 	synchronizer.replication_config = config
 	synchronizer.root_path = get_path()
 	synchronizer.set_multiplayer_authority(1)
 	add_child(synchronizer)
+
+	# Setup the light switch dynamic prompt on the HUD
+	_switch_prompt = Label.new()
+	_switch_prompt.text = "Press E to toggle lights"
+	_switch_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_switch_prompt.anchor_left = 0.5
+	_switch_prompt.anchor_top = 0.8
+	_switch_prompt.anchor_right = 0.5
+	_switch_prompt.anchor_bottom = 0.8
+	_switch_prompt.offset_left = -250
+	_switch_prompt.offset_top = 0
+	_switch_prompt.offset_right = 250
+	_switch_prompt.offset_bottom = 30
+	_switch_prompt.visible = false
+	var label_settings := LabelSettings.new()
+	label_settings.font_size = 20
+	label_settings.outline_size = 4
+	label_settings.outline_color = Color.BLACK
+	_switch_prompt.label_settings = label_settings
+	hud.add_child(_switch_prompt)
 
 	# ── Multiplayer signals ───────────────────────────────────────────────
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -95,6 +122,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		var master_bus := AudioServer.get_bus_index("Master")
 		AudioServer.set_bus_mute(master_bus, not AudioServer.is_bus_mute(master_bus))
 		print("[Audio Settings] Mute toggled. Current state: ", AudioServer.is_bus_mute(master_bus))
+
+	if event is InputEventKey and event.pressed and event.keycode == KEY_E and not _is_typing():
+		var local_player = players.get_node_or_null(str(multiplayer.get_unique_id()))
+		if local_player and is_instance_valid(local_player):
+			var switch_pos := Vector3(16.0, 14.0, -48.7)
+			if local_player.global_position.distance_to(switch_pos) < 5.0:
+				rpc_toggle_lights.rpc()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Character selection
@@ -282,6 +316,13 @@ func _process(delta: float) -> void:
 			time_left = max(0.0, time_left - delta)
 			if time_left <= 0.0:
 				_end_game("Cats")  # Gekkos ran out of time
+			
+			# Tick down light switch cooldown and automatically restore lights when it hits 0
+			if not lights_on:
+				lights_cooldown = max(0.0, lights_cooldown - delta)
+				if lights_cooldown <= 0.0:
+					lights_on = true
+					print("[Server] Darkness duration ended. Lights automatically restored.")
 				
 		# Update HUD labels
 		var minutes := int(time_left) / 60
@@ -289,6 +330,39 @@ func _process(delta: float) -> void:
 		timer_label.text = "Time: %d:%02d" % [minutes, seconds]
 		crickets_label.text = "Crickets: %d/%d" % [eaten_crickets, total_crickets]
 		lizards_label.text = "Lizards Remaining: %d" % [total_lizards - captured_lizards]
+
+		# Update visual room lights
+		var map_node = find_child("Map", true, false)
+		if map_node:
+			for child in map_node.get_children():
+				if child is OmniLight3D:
+					child.light_energy = 8.0 if lights_on else 0.0
+
+		# Update switch prompt visibility and text based on 3D distance to switch
+		var show_prompt := false
+		var local_player = players.get_node_or_null(str(multiplayer.get_unique_id()))
+		if local_player and is_instance_valid(local_player):
+			var switch_pos := Vector3(16.0, 14.0, -48.7)
+			if local_player.global_position.distance_to(switch_pos) < 5.0:
+				show_prompt = true
+				
+		if _switch_prompt:
+			if show_prompt:
+				var local_id := multiplayer.get_unique_id()
+				var is_cat: bool = _peer_characters.get(local_id, "gekko") == "cat"
+				if lights_on:
+					if is_cat:
+						_switch_prompt.text = "Press E to turn OFF lights"
+					else:
+						_switch_prompt.text = "Only Cats can turn off lights"
+				else:
+					if not is_cat:
+						_switch_prompt.text = "Press E to turn ON lights early (Timer: %.1fs)" % lights_cooldown
+					else:
+						_switch_prompt.text = "Lights Sabotaged! Restoring in %.1fs" % lights_cooldown
+				_switch_prompt.visible = true
+			else:
+				_switch_prompt.visible = false
 		
 	elif game_state == "game_over":
 		lobby_ui.hide()
@@ -444,3 +518,29 @@ func _process_and_route_chat_message(sender_id: int, message: String) -> void:
 func rpc_receive_chat_message(sender_id: int, team_name: String, filtered_text: String) -> void:
 	if chat_ui:
 		chat_ui.add_chat_message(sender_id, team_name, filtered_text)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_toggle_lights() -> void:
+	if not multiplayer.is_server():
+		return
+	var sender_id := multiplayer.get_remote_sender_id()
+	if sender_id == 0:
+		sender_id = multiplayer.get_unique_id()
+	var sender_char: String = _peer_characters.get(sender_id, "gekko")
+	
+	if lights_on:
+		# Only cats (or server/host) can turn off the lights
+		if sender_char == "cat" or sender_id == 1:
+			lights_on = false
+			lights_cooldown = 15.0
+			print("[Server] Lights turned OFF by peer %d. Cooldown started." % sender_id)
+	else:
+		# Only lizards (gekkos) can turn them back on early, or anyone can turn them on once the timer finishes
+		if sender_char == "gekko" or sender_id == 1 or lights_cooldown <= 0.0:
+			lights_on = true
+			lights_cooldown = 0.0
+			print("[Server] Lights restored by peer %d." % sender_id)
+
+func _is_typing() -> bool:
+	var focus := get_viewport().gui_get_focus_owner()
+	return focus != null and focus is LineEdit
