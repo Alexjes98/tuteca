@@ -39,6 +39,13 @@ var _pitch: float = -0.35
 ## Captured state: when true, character is disabled and invisible.
 var captured: bool = false
 var _was_captured: bool = false
+var _in_coffee: bool = false
+var noclip: bool = false:
+	set(val):
+		noclip = val
+		var col = get_node_or_null("CollisionShape3D")
+		if col:
+			col.disabled = val
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
@@ -98,8 +105,27 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if not is_multiplayer_authority():
 		return
+		
+	# Press Escape to release mouse
+	if event.is_action_pressed("ui_cancel"):
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		return
+		
+	# Left-click on game view to capture mouse (only when F1/Pause overlay is closed)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var main = get_tree().current_scene
+		var is_ui_open := false
+		if main:
+			var dev = main.get("_dev_tools_panel")
+			var pause = main.get("_pause_menu_panel")
+			is_ui_open = (dev and dev.visible) or (pause and pause.visible)
+		
+		if not is_ui_open:
+			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+			
 	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		return
+		
 	if event is InputEventMouseMotion:
 		# Yaw: rotate the CameraPivot around its local Y axis (surface normal)
 		var local_y := _cam_pivot.global_transform.basis.y.normalized()
@@ -116,6 +142,26 @@ func _physics_process(delta: float) -> void:
 	if captured:
 		velocity = Vector3.ZERO
 		return
+
+	# Coffee mug detection & splash (Only in Sunroom Library map)
+	var main_scene = get_tree().current_scene
+	var is_library = main_scene and main_scene.get("_chosen_map") == "Sunroom Library"
+	
+	var in_coffee_box := false
+	if is_library:
+		in_coffee_box = global_position.x > -9.3 and global_position.x < -6.7 \
+				and global_position.z > -23.3 and global_position.z < -20.7 \
+				and global_position.y > 7.1 and global_position.y < 10.1
+			
+	if in_coffee_box:
+		if not _in_coffee:
+			_in_coffee = true
+			if is_multiplayer_authority():
+				rpc_spawn_splash.rpc(Vector3(-8.0, 8.8, -22.0))
+				if FileAccess.file_exists("res://assets/sounds/coffee_splash.mp3"):
+					rpc_play_splash_sound.rpc()
+	else:
+		_in_coffee = false
 		
 	# Smoothly align camera pivot's local up vector with the character's surface normal
 	var current_up := _cam_pivot.global_transform.basis.y.normalized()
@@ -150,16 +196,22 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 
-	# Mouse capture toggle
-	if Input.is_action_just_pressed("ui_cancel"):
-		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
-			and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
 	_process_movement(delta)
 	_process_special(delta)
 	move_and_slide()
+	
+	# Apply dynamic physics push impulse to RigidBody3D nodes (yarn balls)
+	for i in get_slide_collision_count():
+		var col := get_slide_collision(i)
+		var collider := col.get_collider()
+		if collider is RigidBody3D:
+			var push_dir := -col.get_normal()
+			push_dir.y = 0.0
+			push_dir = push_dir.normalized()
+			# Apply push force scaled by character speed
+			var force := 12.0
+			collider.apply_impulse(push_dir * force, col.get_position() - collider.global_position)
+			
 	_post_physics()
 
 func _is_typing() -> bool:
@@ -170,9 +222,38 @@ func _is_typing() -> bool:
 ## Shared gravity + floor-jump + WASD locomotion.
 ## Gekko overrides this to inject wall-climb detection before calling super().
 func _process_movement(delta: float) -> void:
+	if noclip:
+		var raw := Vector2.ZERO
+		if not _is_typing():
+			if Input.is_action_pressed("move_forward"): raw.y -= 1.0
+			if Input.is_action_pressed("move_back"):    raw.y += 1.0
+			if Input.is_action_pressed("move_left"):    raw.x -= 1.0
+			if Input.is_action_pressed("move_right"):   raw.x += 1.0
+		
+		var cam_basis = camera.global_transform.basis
+		var dir = cam_basis.x * raw.x + cam_basis.z * raw.y
+		
+		var up_down := 0.0
+		if not _is_typing():
+			if Input.is_action_pressed("jump"):
+				up_down += 1.0
+			if Input.is_physical_key_pressed(KEY_CTRL):
+				up_down -= 1.0
+				
+		velocity = (dir.normalized() + Vector3.UP * up_down).normalized() * SPEED * 4.0
+		return
+
 	# Gravity
 	if not is_on_floor():
-		velocity += get_gravity() * delta
+		# Apply fireplace updraft (thermal lift) if in Sunroom Library map
+		var main_scene = get_tree().root.get_child(0)
+		var is_sunroom = main_scene != null and main_scene.get("_chosen_map") == "Sunroom Library"
+		if is_sunroom and global_position.x > -8.0 and global_position.x < 8.0 \
+				and global_position.z > -50.0 and global_position.z < -42.0 \
+				and global_position.y > 0.0 and global_position.y < 25.0:
+			velocity.y = move_toward(velocity.y, 16.0, 40.0 * delta)
+		else:
+			velocity += get_gravity() * delta
 
 	# Jump — only from floor; mid-air space is reserved per-character
 	if not _is_typing() and Input.is_action_pressed("jump") and is_on_floor():
@@ -273,3 +354,52 @@ func rpc_spawn_explosion(pos: Vector3) -> void:
 	
 	# Automatically clean up node after lifetime ends
 	get_tree().create_timer(particles.lifetime + 0.1).timeout.connect(particles.queue_free)
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Spawns a temporary splash particle effect at the specified position.
+@rpc("any_peer", "call_local", "reliable")
+func rpc_spawn_splash(pos: Vector3) -> void:
+	var particles := CPUParticles3D.new()
+	var sphere_mesh := SphereMesh.new()
+	sphere_mesh.radius = 0.15
+	sphere_mesh.height = 0.3
+	
+	var material := StandardMaterial3D.new()
+	material.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.2, 0.1, 0.05) # Coffee brown color
+	sphere_mesh.material = material
+	
+	particles.mesh = sphere_mesh
+	particles.emitting = false
+	particles.one_shot = true
+	particles.explosiveness = 0.95
+	particles.amount = 25
+	particles.lifetime = 0.6
+	particles.spread = 45.0
+	particles.direction = Vector3.UP # Splash upwards
+	particles.initial_velocity_min = 6.0
+	particles.initial_velocity_max = 10.0
+	particles.gravity = Vector3(0, -12.0, 0)
+	
+	# Add particles to the parent stage node so they stay stationary in the world
+	get_parent().add_child(particles)
+	particles.global_position = pos
+	particles.emitting = true
+	
+	# Automatically clean up node after lifetime ends
+	get_tree().create_timer(particles.lifetime + 0.1).timeout.connect(particles.queue_free)
+
+# ─────────────────────────────────────────────────────────────────────────────
+## Plays a 3D splash sound locally and syncs it to other peers.
+@rpc("any_peer", "call_local", "reliable")
+func rpc_play_splash_sound() -> void:
+	if FileAccess.file_exists("res://assets/sounds/coffee_splash.mp3"):
+		var s_player := AudioStreamPlayer3D.new()
+		s_player.stream = load("res://assets/sounds/coffee_splash.mp3")
+		s_player.volume_db = 0.0
+		s_player.unit_size = 6.0
+		s_player.max_distance = 25.0
+		get_parent().add_child(s_player)
+		s_player.global_position = Vector3(-8.0, 8.8, -22.0)
+		s_player.play()
+		get_tree().create_timer(3.0).timeout.connect(s_player.queue_free)

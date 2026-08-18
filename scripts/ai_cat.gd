@@ -156,6 +156,9 @@ func _nearest_visible_lizard() -> Node3D:
 # ─────────────────────────────────────────────────────────────────────────────
 ## True when `liz` is within range, inside the view cone, and not occluded.
 func _can_see(liz: PhysicsBody3D) -> bool:
+	if "camouflage_transparency" in liz and liz.camouflage_transparency >= 0.6:
+		return false
+
 	var eye := global_position + Vector3.UP * EYE_HEIGHT
 	var to := liz.global_position - eye
 	if to.length() > VISION_RANGE:

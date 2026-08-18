@@ -146,6 +146,8 @@ var _gait_amp: float = 0.0
 ## World-space point the LookAtModifier3D aims the head at (follows the camera).
 var _head_target: Node3D
 var _look_modifier: Node
+var _head_yaw: float = 0.0
+var _head_pitch: float = 0.0
 var _tail_spring: Node
 
 func _setup_skeleton() -> void:
@@ -193,18 +195,9 @@ func _setup_modern_rig() -> void:
 	add_child(_head_target)
 	_head_target.global_position = global_position + Vector3.FORWARD * 8.0
 
-	if _head_bone >= 0 and ClassDB.class_exists("LookAtModifier3D"):
-		var look: Node = ClassDB.instantiate("LookAtModifier3D")
-		look.name = "HeadLook"
-		_skeleton.add_child(look)
-		look.set("bone", _head_bone)
-		look.set("bone_name", _skeleton.get_bone_name(_head_bone))
-		look.set("target_node", look.get_path_to(_head_target))
-		look.set("forward_axis", head_forward_axis)
-		look.set("use_angle_limitation", true)
-		look.set("primary_limit_angle", deg_to_rad(120.0))
-		look.set("secondary_limit_angle", deg_to_rad(70.0))
-		_look_modifier = look
+	# Disabled LookAtModifier3D to prevent tourettes-like head shaking/jitter.
+	# We now use smooth manual mathematical bone rotation.
+	_look_modifier = null
 
 	if _tail_bones.size() >= 2 and ClassDB.class_exists("SpringBoneSimulator3D"):
 		var spring: Node = ClassDB.instantiate("SpringBoneSimulator3D")
@@ -248,8 +241,18 @@ func _animate_skeleton(delta: float, is_moving: bool, _is_sprinting: bool) -> vo
 		deg_to_rad(head_roll_offset)
 	))
 
-	# ── Spine: traveling wave (head → tail), amplitude grows toward the rear —
-	# the lateral undulation real lizards use, instead of one rigid S-flex. ──
+	# Calculate head look direction relative to body rotation
+	var target_yaw := 0.0
+	var target_pitch := 0.0
+	if is_multiplayer_authority() and camera:
+		var local_look = _model_root.global_transform.basis.inverse() * -camera.global_transform.basis.z
+		target_yaw = clampf(atan2(local_look.x, -local_look.z), -1.2, 1.2)
+		target_pitch = clampf(asin(clampf(local_look.y, -0.99, 0.99)), -0.8, 0.8)
+	
+	_head_yaw = lerp_angle(_head_yaw, target_yaw, 12.0 * delta)
+	_head_pitch = lerp_angle(_head_pitch, target_pitch, 12.0 * delta)
+
+	# ── Spine: traveling wave (head → tail), amplitude grows toward the rear ──
 	for i in _spine_bones.size():
 		var b_idx: int = _spine_bones[i]
 		if b_idx in _bone_rest_rotations:
@@ -258,15 +261,16 @@ func _animate_skeleton(delta: float, is_moving: bool, _is_sprinting: bool) -> vo
 			var rot := Quaternion(Vector3.UP, sin(phase) * seg_amp)
 			_skeleton.set_bone_pose_rotation(b_idx, _bone_rest_rotations[b_idx] * rot)
 
-	# ── Neck: slight counter-swing keeps the snout steady while the body waves ──
+	# ── Neck: counter-swing + smooth neck yaw/pitch split (30% neck, 70% head) ──
 	if _neck_bone >= 0 and _neck_bone in _bone_rest_rotations:
+		var neck_rot := Quaternion.from_euler(Vector3(_head_pitch * 0.3, _head_yaw * 0.3, 0.0))
 		var neck_counter := Quaternion(Vector3.UP, -sin(_walk_phase) * 0.06 * amp)
-		_skeleton.set_bone_pose_rotation(_neck_bone, head_rot_offset * _bone_rest_rotations[_neck_bone] * neck_counter)
+		_skeleton.set_bone_pose_rotation(_neck_bone, head_rot_offset * _bone_rest_rotations[_neck_bone] * neck_counter * neck_rot)
 
-	# Head: posed manually only when the LookAtModifier3D isn't driving it
-	# (the modifier runs after this and would override the pose anyway).
-	if _look_modifier == null and _head_bone >= 0 and _head_bone in _bone_rest_rotations:
-		_skeleton.set_bone_pose_rotation(_head_bone, head_rot_offset * _bone_rest_rotations[_head_bone])
+	# Head: posed smoothly based on visual camera direction
+	if _head_bone >= 0 and _head_bone in _bone_rest_rotations:
+		var head_rot := Quaternion.from_euler(Vector3(_head_pitch * 0.7, _head_yaw * 0.7, 0.0))
+		_skeleton.set_bone_pose_rotation(_head_bone, head_rot_offset * _bone_rest_rotations[_head_bone] * head_rot)
 
 	# ── Tail: continues the spine wave with growing amplitude toward the tip.
 	# Kept subtle when the SpringBoneSimulator3D is active, since the spring
@@ -314,6 +318,9 @@ func _wants_climb() -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 func _process_movement(delta: float) -> void:
+	if noclip:
+		super(delta)
+		return
 	var is_moving := _input_vector() != Vector2.ZERO or velocity.length() > 0.2
 	# Sprint: Shift, only while grounded on a surface, moving, and with stamina.
 	_sprinting = _stuck and _stamina > 0.0 \
@@ -457,7 +464,15 @@ func _air(delta: float) -> void:
 		_stick_cd = maxf(_stick_cd - delta, 0.0)
 	if _ceiling_lock > 0.0:
 		_ceiling_lock = maxf(_ceiling_lock - delta, 0.0)
-	velocity += get_gravity() * delta
+	# Apply fireplace updraft (thermal lift) if in Sunroom Library map
+	var main_scene = get_tree().root.get_child(0)
+	var is_sunroom = main_scene != null and main_scene.get("_chosen_map") == "Sunroom Library"
+	if is_sunroom and global_position.x > -8.0 and global_position.x < 8.0 \
+			and global_position.z > -50.0 and global_position.z < -42.0 \
+			and global_position.y > 0.0 and global_position.y < 25.0:
+		velocity.y = move_toward(velocity.y, 16.0, 40.0 * delta)
+	else:
+		velocity += get_gravity() * delta
 
 	var raw := _input_vector()
 	if raw != Vector2.ZERO:

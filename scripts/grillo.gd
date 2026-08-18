@@ -19,12 +19,24 @@ var _jump_progress: float = 0.0
 const JUMP_DURATION := 0.65  # Smooth half-second jump duration
 const JUMP_PEAK := 1.6       # Height of the parabolic arc
 
+var _near_sound_player: AudioStreamPlayer3D
+
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	var area = find_child("CollectionArea", true, false)
 	if area:
 		area.body_entered.connect(_on_body_entered)
 	_reset_hop_timer()
+	
+	# Load proximity sound if saved
+	if FileAccess.file_exists("res://assets/sounds/cricket_near.mp3"):
+		_near_sound_player = AudioStreamPlayer3D.new()
+		_near_sound_player.stream = load("res://assets/sounds/cricket_near.mp3")
+		_near_sound_player.unit_size = 4.0
+		_near_sound_player.max_distance = 15.0
+		_near_sound_player.volume_db = -5.0
+		_near_sound_player.autoplay = false
+		add_child(_near_sound_player)
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Place and orient cricket on a surface given its hit position and normal vector.
@@ -76,6 +88,24 @@ func _reset_hop_timer() -> void:
 	_hop_timer = randf_range(5.0, 10.0)  # Random duration between jumps
 
 func _process(delta: float) -> void:
+	# Play 3D spatial alert sound when local lizard comes within 15 meters
+	if _near_sound_player:
+		var players_root = get_tree().root.find_child("Players", true, false)
+		var local_player = null
+		if players_root:
+			local_player = players_root.get_node_or_null(str(multiplayer.get_unique_id()))
+		if local_player and is_instance_valid(local_player):
+			var dist = local_player.global_position.distance_to(global_position)
+			if dist < 15.0:
+				if not _near_sound_player.playing:
+					_near_sound_player.play()
+			else:
+				if _near_sound_player.playing:
+					_near_sound_player.stop()
+		else:
+			if _near_sound_player.playing:
+				_near_sound_player.stop()
+
 	# 1. Server-side AI logic to pick hop destinations
 	if multiplayer.is_server():
 		var main_node = get_tree().current_scene
