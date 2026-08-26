@@ -565,7 +565,7 @@ func _build_lobby_ui() -> void:
 	_credits_panel.add_child(cr_title)
 	
 	var cr_label = Label.new()
-	cr_label.text = "Developer: Pedro\nDeveloper: Hilmer Vivas\nDeveloper & 3D Artist: Alejandro Lopez\nDesigner Artist: Ivan Lopez"
+	cr_label.text = "Developer: Pedro\nDeveloper: Hilmer Vivas\nDeveloper, 3D Artist & Music designer: Alejandro Lopez\nDesigner Artist: Ivan Lopez"
 	cr_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_credits_panel.add_child(cr_label)
 	
