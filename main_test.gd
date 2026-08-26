@@ -91,6 +91,15 @@ var _chosen_character: String = "gekko"
 ## Populated when a client sends _rpc_set_character, or directly for the host.
 var _peer_characters: Dictionary = {}
 
+# Ambient Music Track paths & Volume
+const MUSIC_MAIN_MENU := "res://assets/sounds/main_menu.mp3"
+const MUSIC_PLAY := "res://assets/sounds/play.mp3"
+const MUSIC_HURRY_UP := "res://assets/sounds/hurry_up.mp3"
+const MUSIC_AMBIENT_VOLUME_DB := -18.0
+
+var _music_player: AudioStreamPlayer
+var _current_music_track: String = ""
+
 # ─────────────────────────────────────────────────────────────────────────────
 func _ready() -> void:
 	# Point spawner at the Players container and supply a spawn factory.
@@ -190,6 +199,10 @@ func _ready() -> void:
 	_switch_icon.label_settings.font_size = 14
 	_compass_bar.add_child(_switch_icon)
 
+	# ── Ambient Background Music Setup ──────────────────────────────────
+	_setup_music_player()
+	_update_music_state()
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_M and event.ctrl_pressed:
 		var master_bus := AudioServer.get_bus_index("Master")
@@ -209,6 +222,46 @@ func _unhandled_input(event: InputEvent) -> void:
 			var switch_pos := Vector3(16.0, 14.0, -48.7) if _chosen_map == "Basic House" else Vector3(16.0, 16.0, -48.7)
 			if local_player.global_position.distance_to(switch_pos) < 5.0:
 				rpc_toggle_lights.rpc()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ambient Background Music System
+# ─────────────────────────────────────────────────────────────────────────────
+func _setup_music_player() -> void:
+	if _music_player != null and is_instance_valid(_music_player):
+		return
+	_music_player = AudioStreamPlayer.new()
+	_music_player.name = "BackgroundMusicPlayer"
+	_music_player.volume_db = MUSIC_AMBIENT_VOLUME_DB
+	_music_player.bus = "Master"
+	add_child(_music_player)
+
+func _play_music(track_path: String) -> void:
+	if _current_music_track == track_path and _music_player != null and _music_player.playing:
+		return
+	_current_music_track = track_path
+	if _music_player == null or not is_instance_valid(_music_player):
+		_setup_music_player()
+	if not FileAccess.file_exists(track_path):
+		push_warning("[Audio] Music track file not found: %s" % track_path)
+		return
+	var stream = load(track_path)
+	if stream is AudioStreamMP3:
+		stream.loop = true
+	elif stream is AudioStreamOggVorbis:
+		stream.loop = true
+	_music_player.stream = stream
+	_music_player.volume_db = MUSIC_AMBIENT_VOLUME_DB
+	_music_player.play()
+	print("[Audio] Playing ambient music: %s (looping, volume: %.1f dB)" % [track_path, MUSIC_AMBIENT_VOLUME_DB])
+
+func _update_music_state() -> void:
+	if game_state == "playing":
+		if time_left <= 60.0 and time_left > 0.0:
+			_play_music(MUSIC_HURRY_UP)
+		else:
+			_play_music(MUSIC_PLAY)
+	elif game_state == "lobby" or game_state == "lobby_room":
+		_play_music(MUSIC_MAIN_MENU)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dynamic UI Builder
@@ -1082,6 +1135,8 @@ func ai_capture_player(target_peer_id: int) -> void:
 # Local Process Loop: compass update & orbital camera panning
 # ─────────────────────────────────────────────────────────────────────────────
 func _process(delta: float) -> void:
+	_update_music_state()
+
 	if game_state == "lobby" or game_state == "lobby_room":
 		_camera_angle += 0.06 * delta
 		var radius := 42.0

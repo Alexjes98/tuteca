@@ -111,14 +111,6 @@ func _setup_environment(map_type: String) -> void:
 			drop_light.shadow_enabled = shadows_on
 			add_child(drop_light)
 
-		# Optional: Background Ambient Music (Sunroom Library only)
-		if FileAccess.file_exists("res://assets/sounds/library_music.ogg"):
-			var music_player := AudioStreamPlayer.new()
-			music_player.stream = load("res://assets/sounds/library_music.ogg")
-			music_player.volume_db = -18.0 # Soft background volume
-			music_player.autoplay = true
-			add_child(music_player)
-			print("[Audio] Ambient library music loaded and playing.")
 
 		# Optional: 3D Fireplace Crackle Ambience (Sunroom Library only)
 		if FileAccess.file_exists("res://assets/sounds/fireplace_crackle.ogg"):
